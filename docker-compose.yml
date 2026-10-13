@@ -1,0 +1,41 @@
+# Self-hosted deployment for Content Management Studio.
+#
+# Usage on the server (inside the cloned repository):
+#   1. create a .env file next to this file with the real secrets
+#   2. edit Caddyfile and put your domain name in it
+#   3. docker compose up -d --build
+#
+# The app keeps its SQLite database and all uploaded/generated media in ./data,
+# which is mounted into the container at /app/data (matching DATA_DIR in the Dockerfile).
+
+services:
+  studio:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8080"
+      DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - studio
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

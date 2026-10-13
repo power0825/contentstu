@@ -1,0 +1,9 @@
+# Replace the domain below with your real domain before deploying.
+# Caddy requests and renews the Let's Encrypt certificate automatically,
+# so ports 80 and 443 must be reachable and the domain must already resolve
+# to this server's public IP.
+
+your-domain.com {
+	encode gzip
+	reverse_proxy studio:8080
+}
