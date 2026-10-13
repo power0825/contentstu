@@ -51,6 +51,15 @@ CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,count INTEGER NOT NULL DEFA
  // Bailian hands out the same key sheet as .xlsx or as a plain .csv export, so both land here.
  // The sheet is normally two columns (label, value), but a spreadsheet-style export with a header
  // row is also common, so readPairs tries the column layout first and falls back to the row one.
+ // Excel writes CSV as UTF-8, UTF-16LE ("Unicode text") or UTF-16BE, so detect the byte order
+ // mark first and fall back to a null-byte sniff before trusting a plain UTF-8 decode.
+ const decodeText=bytes=>{
+  if(bytes[0]===0xFF&&bytes[1]===0xFE)return bytes.toString('utf16le').replace(/^\uFEFF/,'');
+  if(bytes[0]===0xFE&&bytes[1]===0xFF){const swapped=Buffer.from(bytes.subarray(2));if(swapped.length%2===0){swapped.swap16();return swapped.toString('utf16le');}}
+  const utf8=bytes.toString('utf8').replace(/^\uFEFF/,'');
+  if(!utf8.includes('\u0000'))return utf8;
+  return bytes.toString('utf16le').replace(/^\uFEFF/,'');
+ };
  const csvLine=line=>{const out=[];let cur='',quoted=false;for(let i=0;i<line.length;i++){const c=line[i];if(quoted){if(c==='"'){if(line[i+1]==='"'){cur+='"';i++;}else quoted=false;}else cur+=c;}else if(c==='"')quoted=true;else if(c===','){out.push(cur);cur='';}else cur+=c;}out.push(cur);return out;};
  const readPairs=rows=>{
   const map=new Map();
@@ -82,7 +91,7 @@ CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,count INTEGER NOT NULL DEFA
    const bytes=Buffer.from(await f.arrayBuffer());
    const rows=[];
    if(bytes[0]===0x50&&bytes[1]===0x4b){let book;try{book=readXlsx(bytes);}catch{throw new AppError('That .xlsx file could not be read.',400);}for(const s of book)for(const r of s.rows)rows.push(r);}
-   else{let raw=bytes.toString('utf8');if(raw.includes('\u0000'))raw=bytes.toString('utf16le');raw=raw.replace(/^\uFEFF/,'');for(const line of raw.split(/\r?\n/)){if(line.trim())rows.push(csvLine(line));}}
+   else{const raw=decodeText(bytes);for(const line of raw.split(/\r?\n/)){if(line.trim())rows.push(csvLine(line));}}
    const pairs=readPairs(rows);
    const apiKey=pairs.get('apikey')||'';
    const openaiUrl=(pairs.get('openaicompatible')||'').replace(/\/+$/,'');
@@ -90,7 +99,9 @@ CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,count INTEGER NOT NULL DEFA
    const workspace=pairs.get('workspaceid')||'';
    if(!openaiUrl||!dashUrl)throw new AppError('This file does not contain the Bailian workspace endpoints. Upload the key file downloaded from the Bailian console.',400);
    if(!apiKey)throw new AppError('The apiKey entry in this file is empty. Download the file again from Bailian, or paste your key into the field instead.',400);
-   if(!/^sk-[A-Za-z0-9_-]{8,}$/.test(apiKey))throw new AppError('The apiKey entry in this file does not look like a Bailian key. Check that you uploaded the file downloaded from the Bailian console.',400);
+   // Older Bailian keys are "sk-" + ~32 characters; keys created after the security upgrade are
+   // "sk-ws" and longer. Only the prefix and the absence of whitespace are safe to require.
+   if(!/^sk-\S{8,}$/.test(apiKey))throw new AppError('The apiKey entry in this file does not look like a Bailian key (read '+apiKey.length+' characters). Upload the file downloaded from the Bailian console, or paste your key into the field instead.',400);
    db.prepare('INSERT INTO model_settings(user_id,api_key,image_model,video_model,openai_url,dash_url,workspace,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET api_key=excluded.api_key,openai_url=excluded.openai_url,dash_url=excluded.dash_url,workspace=excluded.workspace,updated_at=excluded.updated_at').run(user.id,apiKey,'','',openaiUrl,dashUrl,workspace,new Date().toISOString());
    return json({ok:true,workspace,keyHint:maskKey(apiKey)});
   }
