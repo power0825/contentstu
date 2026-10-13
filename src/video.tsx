@@ -1,5 +1,6 @@
 import {useEffect,useState} from 'react';
 import {Film,Plus,Sparkles,Upload,Download,LoaderCircle,Check,ArrowRight,Save,RefreshCw,Image as ImageIcon,Play} from 'lucide-react';
+import {shrinkImage} from './resize';
 type Shot={id:string;title:string;duration:number;trimStart:number;script:string;imagePrompt:string;lastImagePrompt:string;videoPrompt:string;caption:string;firstFrameId:string;lastFrameId:string;clipId:string;status:string;error:string};
 type Project={id:string;title:string;brief:string;ratio:string;resolution:string;brand:string;endLine:string;music:string;musicId:string;logoId:string;transition:string;subtitles:boolean;captionStyle:string;exportId:string;exportStatus:string;exportError:string;shots:Shot[]};
 const stages=['Brief','Storyboard','Images','Clips','Edit & Export'];
@@ -38,7 +39,7 @@ export default function VideoStudio(){
  function editShot(index:number,patch:Partial<Shot>){if(!p)return;edit({shots:p.shots.map((s,i)=>i===index?{...s,...patch}:s)});}
  async function save(current=p){if(!current)return;const d=await api('/api/video',{action:'save',project:current});setP(d.project);setDirty(false);return d.project as Project;}
  async function action(kind:string,extras:Record<string,unknown>={}){if(!p)return;await task(kind,async()=>{if(dirty)await save();const d=await api('/api/video',{action:kind,projectId:p.id,...extras});setP(d.project);setDirty(false);await refresh();setNotice(kind==='generate'?'Clip submitted. You can leave this page; the server keeps checking its status.':kind==='export'?'Rendering your timeline. Your MP4 will appear here.':'Workspace updated.');});}
- async function upload(f:File,kind:string,index=selected){await task('Uploading',async()=>{const form=new FormData();form.set('file',f);const r=await fetch(kind==='clip'||kind==='music'?'/api/video/upload':'/api/upload',{method:'POST',body:form});const d=await r.json();if(!r.ok)throw Error(d.error||'Upload failed.');if(kind==='reference'){setReference(d.id);setNotice('Product reference uploaded.');return;}if(!p)return;
+ async function upload(f:File,kind:string,index=selected){await task('Uploading',async()=>{if(kind!=='clip'&&kind!=='music')f=await shrinkImage(f);const form=new FormData();form.set('file',f);const r=await fetch(kind==='clip'||kind==='music'?'/api/video/upload':'/api/upload',{method:'POST',body:form});const d=await r.json();if(!r.ok)throw Error(d.error||'Upload failed.');if(kind==='reference'){setReference(d.id);setNotice('Product reference uploaded.');return;}if(!p)return;
  if(kind==='clip'){if(dirty)await save();const out=await api('/api/video',{action:'attach',projectId:p.id,shotId:p.shots[index].id,assetId:d.id});setP(out.project);setDirty(false);await refresh();return;}
  const next=kind==='music'?{...p,musicId:d.id,music:'upload'}:kind==='logo'?{...p,logoId:d.id}:{...p,shots:p.shots.map((s,i)=>i===index?{...s,[kind==='last'?'lastFrameId':'firstFrameId']:d.id}:s)};setP(next);setDirty(true);});}
  const shot=p?.shots[selected];const total=p?.shots.reduce((n,s)=>n+s.duration,0)||0;let time=0;
