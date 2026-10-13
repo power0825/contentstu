@@ -121,7 +121,7 @@ export function buildSections(channel,parsed,ctx={}){
 }
 // profileFor is deliberately not used: it falls back to DEFAULT_CONFIG, which describes how to stage a
 // product photograph. Text Studio resolves the profile itself and falls back to TEXT_STUDIO_CONFIG.
-export function createTextStudio({db,env,provider,reserve,refund,costs,prompts}){
+export function createTextStudio({db,env,provider,credsFor,reserve,refund,costs,prompts}){
  db.exec('CREATE TABLE IF NOT EXISTS text_drafts(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,product_id TEXT NOT NULL,product_label TEXT NOT NULL,channel TEXT NOT NULL,language TEXT NOT NULL,angle TEXT NOT NULL,sections TEXT NOT NULL,prompt TEXT NOT NULL DEFAULT \'\',created_at TEXT NOT NULL);CREATE INDEX IF NOT EXISTS text_drafts_user ON text_drafts(user_id,created_at);');
  if(!new Set(db.prepare('PRAGMA table_info(text_drafts)').all().map(c=>c.name)).has('prompt'))db.exec("ALTER TABLE text_drafts ADD COLUMN prompt TEXT NOT NULL DEFAULT ''");
  const select='SELECT id,product_id,product_label,channel,language,angle,sections,prompt,created_at FROM text_drafts WHERE user_id=? ORDER BY created_at DESC LIMIT 40';
@@ -216,7 +216,8 @@ export function createTextStudio({db,env,provider,reserve,refund,costs,prompts})
   const productId=typeof body.productId==='string'?body.productId.trim().slice(0,80):'';
   const product=db.prepare('SELECT id,label,data FROM products WHERE id=?').get(productId);
   if(!product)fail('That product is not in the shared library.',404);
-  if(!env.VOLCENGINE_TEXT_MODEL)fail('The instructor needs to configure the language model ID before copy can be written.',503);
+  const creds=credsFor(user.id);
+  if(!creds.textModel)fail('The instructor needs to configure the language model ID before copy can be written.',503);
   let spec={};try{spec=JSON.parse(product.data);}catch{spec={};}
   const columns=columnRows();
   const values=prompts.values(user.id);
@@ -241,7 +242,7 @@ export function createTextStudio({db,env,provider,reserve,refund,costs,prompts})
    let blocks=null,usage=null;
    for(let attempt=0;attempt<3&&!blocks;attempt++){
     const extra=attempt===0?'':'\n\nReply with raw JSON only. No prose, no markdown fences, no bullet lists. Use exactly the keys in the shape above and finish every string.';
-    const out=await provider('chat/completions',{model:env.VOLCENGINE_TEXT_MODEL,messages:[{role:'system',content:system},{role:'user',content:userMessage+extra}],max_tokens:2400},120000);
+    const out=await provider('chat/completions',{model:creds.textModel,messages:[{role:'system',content:system},{role:'user',content:userMessage+extra}],max_tokens:2400},120000,creds);
     usage=(out&&out.usage)||usage;
     const parsed=extractJson(out&&out.choices&&out.choices[0]&&out.choices[0].message?out.choices[0].message.content:'');
     if(!parsed)continue;
@@ -268,7 +269,7 @@ export function createTextStudio({db,env,provider,reserve,refund,costs,prompts})
      const written=blocks.filter(section=>section.source==='ai');
      // How much editorial guidance (everything except the structural layers) each run received.
      const guidance=parts.filter(part=>!preset.omit.includes(part.key)&&!LOCKED_LAYERS.has(part.key));
-     costs?.recordText({userId:user.id,stage:'Copy comparison',model:env.VOLCENGINE_TEXT_MODEL,groupId,groupKind:'text',groupLabel:product.label+' - '+preset.label,usage,chars:JSON.stringify(written).length});
+     costs?.recordText({userId:user.id,stage:'Copy comparison',model:creds.textModel,groupId,groupKind:'text',groupLabel:product.label+' - '+preset.label,usage,chars:JSON.stringify(written).length});
      runs.push({...preset,sections:written,guidanceChars:guidance.reduce((n,p)=>n+p.body.length,0),layersSent:guidance.length});
     }catch(e){
      refund(quota,'prompt');
@@ -285,7 +286,7 @@ export function createTextStudio({db,env,provider,reserve,refund,costs,prompts})
    const sectionsText=JSON.stringify(blocks);
    const promptText=JSON.stringify({parts:parts.map(({key,title,body,locked})=>({key,title,body,locked:!!locked})),omitted,system});
    db.prepare('INSERT INTO text_drafts(id,user_id,product_id,product_label,channel,language,angle,sections,prompt,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,user.id,product.id,product.label,channel,language,angle,sectionsText,promptText,stamp);
-   costs?.recordText({userId:user.id,stage:'Copy draft',model:env.VOLCENGINE_TEXT_MODEL,groupId:id,groupKind:'text',groupLabel:product.label+' - '+CHANNELS[channel].label,usage,chars:sectionsText.length});
+   costs?.recordText({userId:user.id,stage:'Copy draft',model:creds.textModel,groupId:id,groupKind:'text',groupLabel:product.label+' - '+CHANNELS[channel].label,usage,chars:sectionsText.length});
    const draft={id,product_id:product.id,product_label:product.label,channel,language,angle,sections:blocks,prompt:parsePrompt(promptText),created_at:stamp};
    return json({draft,drafts:list(user)});
   }catch(e){
