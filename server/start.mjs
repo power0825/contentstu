@@ -8,7 +8,7 @@ const host=process.env.HOST||'127.0.0.1',port=Number(process.env.PORT)||5173;
 const app=createApp({dataDir:resolve(process.env.DATA_DIR||'data')});let vite;
 const server=http.createServer(async(req,res)=>{
  try{
-  const origin=process.env.PUBLIC_ORIGIN||`http://${req.headers.host}`;const url=new URL(req.url,origin);
+  const origin=process.env.PUBLIC_ORIGIN||`${req.headers['x-forwarded-proto']||'http'}://${req.headers.host}`;const url=new URL(req.url,origin);
   if(url.pathname.startsWith('/api/')){
    const max=url.pathname==='/api/video/upload'?101*1024*1024:url.pathname==='/api/upload'?9*1024*1024:url.pathname==='/api/library'?9*1024*1024:url.pathname.startsWith('/api/auth/')?20000:250000;
    if(Number(req.headers['content-length'])>max){res.writeHead(413,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'This request is too large.'}));req.resume();return;}
