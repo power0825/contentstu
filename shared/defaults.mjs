@@ -52,7 +52,7 @@ export const RATIOS = { "1:1": "1024x1024", "4:3": "1152x864", "3:4": "864x1152"
 // the account's own Bailian workspace decides what is actually enabled, and every ID
 // stays editable so a new model does not need a code change.
 export const MODEL_CANDIDATES = {
-  image: ["qwen-image-3.0", "qwen-image-3.0-pro", "qwen-image-2.1-pro", "qwen-image-2.1-turbo", "qwen-mt-image-2.0", "doubao-seedream-4-5-251128"],
+  image: ["qwen-image-3.0", "qwen-image-3.0-pro", "qwen-image-2.1-pro", "qwen-image-2.1-turbo"],
   video: ["wan3.0-video", "wan3.0-video-prime"]
 };
 // The copywriting counterpart to DEFAULT_CONFIG. DEFAULT_CONFIG describes how to stage a product

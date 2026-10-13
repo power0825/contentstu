@@ -5,6 +5,15 @@ import { Upload,LoaderCircle,Check,X,AlertCircle,CheckCircle2 } from "lucide-rea
 type Candidates={image:string[];video:string[]};
 type Settings={configured:boolean;workspace:string;keyHint:string;imageModel:string;videoModel:string;connected:boolean;candidates:Candidates};
 
+// A plain <input list> lets the browser filter the suggestions by whatever is already typed, which
+// hides most of the list. A real <select> shows every candidate, and the "Other model" entry keeps
+// the door open for a model that is not in the list yet.
+function ModelField({label,value,options,placeholder,onChange}:{label:string;value:string;options:string[];placeholder:string;onChange:(v:string)=>void}){
+ const [custom,setCustom]=useState(!!value&&!options.includes(value));
+ if(custom)return <label className="modal-field">{label}<div className="model-custom"><input value={value} maxLength={80} spellCheck={false} placeholder={placeholder} onChange={e=>onChange(e.target.value)}/><button type="button" className="button secondary small" onClick={()=>{onChange(options[0]||"");setCustom(false);}}>Pick from list</button></div></label>;
+ return <label className="modal-field">{label}<select value={value} onChange={e=>{const v=e.target.value;if(v==="__other__"){setCustom(true);onChange("");}else onChange(v);}}>{!!value&&!options.includes(value)&&<option value={value}>{value}</option>}{options.map(m=><option key={m} value={m}>{m}</option>)}<option value="__other__">Other model...</option></select></label>;
+}
+
 export default function ModelSettings({onClose,onChanged}:{onClose:()=>void;onChanged:()=>void}){
  const [data,setData]=useState<Settings|null>(null);
  const [imageModel,setImageModel]=useState("");
@@ -60,8 +69,8 @@ export default function ModelSettings({onClose,onChanged}:{onClose:()=>void;onCh
      <h3>Model</h3>
      <p className="helper">Each model has its own free quota. If one runs out, pick another and save.</p>
      <div className="field-grid">
-      <label className="modal-field">Image model<input list="image-model-options" value={imageModel} maxLength={80} spellCheck={false} onChange={e=>setImageModel(e.target.value)} placeholder="qwen-image-3.0"/><datalist id="image-model-options">{candidates.image.map(m=><option key={m} value={m}/>)}</datalist></label>
-      <label className="modal-field">Video model<input list="video-model-options" value={videoModel} maxLength={80} spellCheck={false} onChange={e=>setVideoModel(e.target.value)} placeholder="wan3.0-video"/><datalist id="video-model-options">{candidates.video.map(m=><option key={m} value={m}/>)}</datalist></label>
+      <ModelField label="Image model" value={imageModel} options={candidates.image} placeholder="qwen-image-3.0" onChange={setImageModel}/>
+      <ModelField label="Video model" value={videoModel} options={candidates.video} placeholder="wan3.0-video" onChange={setVideoModel}/>
      </div>
     </section>
    </div>
