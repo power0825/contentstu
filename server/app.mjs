@@ -48,6 +48,27 @@ CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,count INTEGER NOT NULL DEFA
  const library=createLibrary({db,dataDir,saveAsset});
  const studio=createTextStudio({db,env,provider,credsFor,reserve,refund,costs,prompts});
  const maskKey=value=>{const s=String(value||'').trim();return s?s.slice(0,7)+'...'+s.slice(-4):'';};
+ // Bailian hands out the same key sheet as .xlsx or as a plain .csv export, so both land here.
+ // The sheet is normally two columns (label, value), but a spreadsheet-style export with a header
+ // row is also common, so readPairs tries the column layout first and falls back to the row one.
+ const csvLine=line=>{const out=[];let cur='',quoted=false;for(let i=0;i<line.length;i++){const c=line[i];if(quoted){if(c==='"'){if(line[i+1]==='"'){cur+='"';i++;}else quoted=false;}else cur+=c;}else if(c==='"')quoted=true;else if(c===','){out.push(cur);cur='';}else cur+=c;}out.push(cur);return out;};
+ const readPairs=rows=>{
+  const map=new Map();
+  for(const r of rows){const k=String((r&&r[0])||'').trim().toLowerCase(),v=String((r&&r[1])||'').trim();if(k&&v&&!map.has(k))map.set(k,v);}
+  if(map.has('apikey')&&map.has('openaicompatible'))return map;
+  for(let i=0;i<rows.length;i++){
+   const header=(rows[i]||[]).map(v=>String(v||'').trim().toLowerCase());
+   if(!header.includes('apikey')||!header.includes('openaicompatible'))continue;
+   for(let j=i+1;j<rows.length;j++){
+    const row=rows[j]||[];
+    if(!row.some(v=>String(v||'').trim()))continue;
+    header.forEach((k,column)=>{if(k&&!map.has(k)){const v=String(row[column]||'').trim();if(v)map.set(k,v);}});
+    break;
+   }
+   break;
+  }
+  return map;
+ };
  // Model settings are per account. The workbook that Bailian exports is a two-column sheet of
  // label/value pairs (id, apiKey, apiHost, openAiCompatible, dashScope, ...), so the reader below
  // only needs the first two columns. Uploading never clears an existing model choice.
@@ -57,16 +78,19 @@ CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,count INTEGER NOT NULL DEFA
   if(request.method==='GET')return json({configured:!!String(row?.api_key||'').trim(),workspace:current.workspace,keyHint:maskKey(row?.api_key),imageModel:String(row?.image_model||'')||current.imageModel,videoModel:String(row?.video_model||'')||current.videoModel,personal:{key:current.personal,image:!!String(row?.image_model||''),video:!!String(row?.video_model||'')},connected:!!current.key,candidates:MODEL_CANDIDATES});
   if(request.method==='POST'){
    const f=(await request.formData()).get('file');
-   if(!(f instanceof File)||!f.size||f.size>4194304)throw new AppError('Upload the Bailian configuration workbook (.xlsx) under 4 MB.');
-   let sheets;try{sheets=readXlsx(Buffer.from(await f.arrayBuffer()));}catch{throw new AppError('That file could not be read as an .xlsx workbook.',400);}
-   const pairs=new Map();
-   for(const s of sheets)for(const r of s.rows){const k=String((r&&r[0])||'').trim().toLowerCase(),v=String((r&&r[1])||'').trim();if(k&&v&&!pairs.has(k))pairs.set(k,v);}
+   if(!(f instanceof File)||!f.size||f.size>4194304)throw new AppError('Upload the Bailian key file (.xlsx or .csv) under 4 MB.');
+   const bytes=Buffer.from(await f.arrayBuffer());
+   const rows=[];
+   if(bytes[0]===0x50&&bytes[1]===0x4b){let book;try{book=readXlsx(bytes);}catch{throw new AppError('That .xlsx file could not be read.',400);}for(const s of book)for(const r of s.rows)rows.push(r);}
+   else{let raw=bytes.toString('utf8');if(raw.includes('\u0000'))raw=bytes.toString('utf16le');raw=raw.replace(/^\uFEFF/,'');for(const line of raw.split(/\r?\n/)){if(line.trim())rows.push(csvLine(line));}}
+   const pairs=readPairs(rows);
    const apiKey=pairs.get('apikey')||'';
    const openaiUrl=(pairs.get('openaicompatible')||'').replace(/\/+$/,'');
    const dashUrl=(pairs.get('dashscope')||'').replace(/\/+$/,'');
    const workspace=pairs.get('workspaceid')||'';
-   if(!openaiUrl||!dashUrl)throw new AppError('This workbook does not contain the Bailian workspace endpoints.',400);
-   if(!apiKey)throw new AppError('The apiKey row in this workbook is empty. Download the file again from Bailian, or paste your key into the field instead.',400);
+   if(!openaiUrl||!dashUrl)throw new AppError('This file does not contain the Bailian workspace endpoints. Upload the key file downloaded from the Bailian console.',400);
+   if(!apiKey)throw new AppError('The apiKey entry in this file is empty. Download the file again from Bailian, or paste your key into the field instead.',400);
+   if(!/^sk-[A-Za-z0-9_-]{8,}$/.test(apiKey))throw new AppError('The apiKey entry in this file does not look like a Bailian key. Check that you uploaded the file downloaded from the Bailian console.',400);
    db.prepare('INSERT INTO model_settings(user_id,api_key,image_model,video_model,openai_url,dash_url,workspace,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET api_key=excluded.api_key,openai_url=excluded.openai_url,dash_url=excluded.dash_url,workspace=excluded.workspace,updated_at=excluded.updated_at').run(user.id,apiKey,'','',openaiUrl,dashUrl,workspace,new Date().toISOString());
    return json({ok:true,workspace,keyHint:maskKey(apiKey)});
   }

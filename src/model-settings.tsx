@@ -48,10 +48,10 @@ export default function ModelSettings({onClose,onChanged}:{onClose:()=>void;onCh
     <section className="modal-section">
      <h3>Bailian API key</h3>
      <div className={`key-status ${connected?"is-ready":""}`}>{connected?<><Check size={15}/><span>{data?.workspace||"Workspace"}</span><code>{data?.keyHint}</code></>:<><X size={15}/><span>Not connected yet</span></>}</div>
-     <p className="helper">Download the apiKey workbook from the Bailian console and upload it here — the key and endpoint are read automatically.</p>
+     <p className="helper">Download the apiKey file from the Bailian console — .xlsx or .csv — and upload it here. The key and endpoint are read automatically.</p>
      <div className="modal-row">
-      <button className="button secondary" onClick={()=>fileRef.current?.click()} disabled={!!busy}>{busy==="Reading your file"?<LoaderCircle size={16} className="spin"/>:<Upload size={16}/>}Upload .xlsx</button>
-      <input ref={fileRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={e=>{const f=e.target.files?.[0];e.target.value="";if(f)upload(f);}}/>
+      <button className="button secondary" onClick={()=>fileRef.current?.click()} disabled={!!busy}>{busy==="Reading your file"?<LoaderCircle size={16} className="spin"/>:<Upload size={16}/>}Upload key file</button>
+      <input ref={fileRef} type="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" className="hidden" onChange={e=>{const f=e.target.files?.[0];e.target.value="";if(f)upload(f);}}/>
      </div>
      <label className="modal-field">Or paste the key manually<input type="password" value={apiKey} maxLength={200} autoComplete="off" spellCheck={false} onChange={e=>setApiKey(e.target.value)} placeholder={connected?"Leave blank to keep the current key":"sk-..."}/></label>
     </section>
