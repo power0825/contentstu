@@ -28,10 +28,11 @@ export default function ModelSettings({onClose,onChanged}:{onClose:()=>void;onCh
   await load();onChanged();
  });}
 
- async function save(){await run("Saving settings",async()=>{
+ async function save(){setBusy("Saving settings");setError("");setNotice("");try{
   await api("/api/model-settings",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({imageModel,videoModel,apiKey})});
-  setApiKey("");await load();onChanged();setNotice("Model settings saved.");
- });}
+  setApiKey("");await load();onChanged();setNotice("Model settings saved.");setBusy("");
+  window.setTimeout(onClose,900);
+ }catch(e){setError(e instanceof Error?e.message:"Please try again.");setBusy("");}}
 
  const connected=!!data?.connected;
  const candidates=data?.candidates||{image:[],video:[]};
