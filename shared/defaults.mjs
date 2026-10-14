@@ -69,7 +69,7 @@ The product specification table, the company facts, the target channel and any a
 ## Workflow
 1. Read the applications column first - it decides the opening line.
 2. Name the garment the fabric becomes before naming the fabric itself.
-3. Quote two to four specification values. Never round them or add units that are not there.
+3. Say what the fabric is for and why it works there before quoting numbers. Quote two to four specification values as evidence. Never round them or add units that are not there.
 4. If a field is missing, write around it. Never fill the gap with something plausible.
 5. Close by inviting a physical sample assessment.
 

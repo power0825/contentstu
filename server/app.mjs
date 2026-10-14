@@ -23,11 +23,11 @@ CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,mime
 CREATE TABLE IF NOT EXISTS generations(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,prompt TEXT NOT NULL,brief TEXT NOT NULL,ratio TEXT NOT NULL,reference_id TEXT NOT NULL,result_id TEXT,status TEXT NOT NULL,error TEXT,config TEXT NOT NULL,created_at TEXT NOT NULL,session_id TEXT NOT NULL DEFAULT '');CREATE INDEX IF NOT EXISTS history_user ON generations(user_id,created_at);
 CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,count INTEGER NOT NULL DEFAULT 0,prompts INTEGER NOT NULL DEFAULT 0);`);
  if(!new Set(db.prepare('PRAGMA table_info(generations)').all().map(c=>c.name)).has('session_id'))db.exec("ALTER TABLE generations ADD COLUMN session_id TEXT NOT NULL DEFAULT ''");
- const limit=()=>Math.max(1,Math.min(1000,Number(env.DAILY_IMAGE_LIMIT)||20));
  function owned(id,user){const row=db.prepare('SELECT * FROM assets WHERE id=? AND user_id=?').get(id,user);if(!row)throw new AppError('Reference image was not found in your workspace.',404);return row;}
  function dataUrl(id,user){const a=owned(id,user);return `data:${a.mime};base64,${readFileSync(join(dataDir,'images',a.id)).toString('base64')}`;}
  function saveAsset(user,bytes,mime,name){const id=randomUUID(),path=join(dataDir,'images',id);writeFileSync(path,bytes);try{db.prepare('INSERT INTO assets VALUES(?,?,?,?,?)').run(id,user,mime,name,new Date().toISOString());}catch(e){unlinkSync(path);throw e;}return id;}
- function reserve(user,kind){const id=user+':'+new Date().toISOString().slice(0,10);const field=kind==='image'?'count':'prompts';db.prepare('INSERT OR IGNORE INTO usage(id,count,prompts) VALUES(?,0,0)').run(id);if(!db.prepare(`UPDATE usage SET ${field}=${field}+1 WHERE id=? AND ${field}<? RETURNING id`).get(id,kind==='image'?limit():100))throw new AppError(`Your daily ${kind} allowance has been reached.`,429);return id;}
+ // Usage is still counted so the cost pages keep working, but nothing is refused on a daily quota.
+ function reserve(user,kind){const id=user+':'+new Date().toISOString().slice(0,10);const field=kind==='image'?'count':'prompts';db.prepare('INSERT OR IGNORE INTO usage(id,count,prompts) VALUES(?,0,0)').run(id);db.prepare(`UPDATE usage SET ${field}=${field}+1 WHERE id=?`).run(id);return id;}
  function refund(id,kind){const field=kind==='image'?'count':'prompts';db.prepare(`UPDATE usage SET ${field}=MAX(0,${field}-1) WHERE id=?`).run(id);}
  // Every model call resolves its credentials through here. A course account must bring its own
  // Bailian key; only the administrator may fall back to the server .env, so a student cannot
@@ -136,9 +136,8 @@ CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,count INTEGER NOT NULL DEFA
    if(path==='/api/studio'&&request.method==='GET'){
     const profile=db.prepare('SELECT name,rules,skill FROM profiles WHERE user_id=?').get(user.id)||DEFAULT_CONFIG;
     const history=db.prepare('SELECT id,prompt,brief,ratio,reference_id,result_id,status,error,created_at FROM generations WHERE user_id=? ORDER BY created_at DESC LIMIT 60').all(user.id);
-    const usage=db.prepare('SELECT count FROM usage WHERE id=?').get(user.id+':'+new Date().toISOString().slice(0,10));
     const creds=credsFor(user.id,true);
-    return json({profile,history,connection:{text:!!(creds.key&&creds.textModel),image:!!(creds.key&&creds.imageModel),video:!!(creds.key&&creds.videoModel),textName:(creds.textModel||'Language model'),imageName:(creds.imageModel||'Image model'),videoName:(creds.videoModel||'Video model'),connected:!!creds.key,personal:creds.personal,workspace:creds.workspace},remaining:Math.max(0,limit()-(usage?.count||0)),limit:limit(),sizes:RATIOS,models:MODEL_CANDIDATES});
+    return json({profile,history,connection:{text:!!(creds.key&&creds.textModel),image:!!(creds.key&&creds.imageModel),video:!!(creds.key&&creds.videoModel),textName:(creds.textModel||'Language model'),imageName:(creds.imageModel||'Image model'),videoName:(creds.videoModel||'Video model'),connected:!!creds.key,personal:creds.personal,workspace:creds.workspace},sizes:RATIOS,models:MODEL_CANDIDATES});
    }
    if(path.startsWith('/api/assets/')&&request.method==='GET'){
     const a=owned(path.slice(12),user.id);const bytes=readFileSync(join(dataDir,'images',a.id));const headers={'Content-Type':a.mime,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Accept-Ranges':'bytes',...(url.searchParams.has('download')?{'Content-Disposition':`attachment; filename="${a.mime==='video/mp4'?'video.mp4':a.mime==='audio/mpeg'?'music.mp3':a.mime==='audio/wav'?'music.wav':a.mime==='image/png'?'image.png':a.mime==='image/webp'?'image.webp':'image.jpg'}"`}:{})};

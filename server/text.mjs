@@ -65,44 +65,16 @@ function extractJson(raw){
  return null;
 }
 const pick=(value,max=4000)=>{const v=typeof value==='string'?value.trim():'';return v?v.slice(0,max):'';};
-const capitalise=value=>{const v=String(value||'').trim();return v?v.charAt(0).toUpperCase()+v.slice(1):'';};
-// The specification rows the collection card prints, in the order the page shows them.
-const CARD_SPEC_FIELDS=[/\bcomposition\b/i,/\bweight\b/i,/\bwidth\b/i,/\bcolor\b/i,/\bmoq\b/i];
-// Everything on a collection card that is NOT written by the model: read from the product
-// library, or produced by a fixed sentence pattern. Shown next to the written copy so the
-// split between "already in your data" and "needs writing" is visible.
-function derivedCardRows({product,columns,data}){
- const rows=[];
- if(!product||!Array.isArray(columns))return rows;
- const applications=pick(data&&data.typical_applications,300);
- if(applications){
-  const tag=applications.split(/[;,/]/).map(capitalise).filter(Boolean).slice(0,2).join(' / ');
-  if(tag)rows.push({label:'Badge on the photo',text:tag,source:'library'});
- }
- const name=pick(data&&data.product_category,120)||product.label;
- if(name)rows.push({label:'Small product label',text:name,source:'library'});
- const specs=[];
- for(const pattern of CARD_SPEC_FIELDS){
-  const column=columns.find(c=>pattern.test(c.label));
-  if(!column)continue;
-  const value=pick(data&&data[column.key],200);
-  if(value)specs.push(column.label+': '+value);
- }
- if(specs.length)rows.push({label:'Specification table',items:specs,source:'library'});
- rows.push({label:'Card link',text:'Request a '+product.label.toLowerCase()+' sample',source:'fixed'});
- return rows;
-}
 export function buildSections(channel,parsed,ctx={}){
  const out=[];
  if(!parsed||typeof parsed!=='object')return out;
  const list=(label,value,source='ai')=>{if(Array.isArray(value)){const items=value.map(v=>pick(v,600)).filter(Boolean);if(items.length)out.push({label,items,source});}};
  const push=(label,value,source='ai')=>{const v=pick(value,4000);if(v)out.push({label,text:v,source});};
  if(channel==='website'){
-  // Only two strings on a collection card have to be written. The rest of the card is listed
-  // after them, tagged with where it actually comes from.
+  // A collection card has exactly two strings worth writing. Everything else on the card is taken
+  // from the product library, so it is not repeated in the output panel.
   push('Collection card headline',parsed.cardHeadline);
   push('Collection card paragraph',parsed.cardParagraph);
-  out.push(...derivedCardRows(ctx));
   return out;
  }
  if(channel==='instagram'){
@@ -129,19 +101,12 @@ export function createTextStudio({db,env,provider,credsFor,reserve,refund,costs,
  // The rules and the Skill come from prompt_settings (text.agentRules / text.agentSkill); their shipped
  // defaults live in shared/defaults.mjs. profiles.rules/skill no longer feed any prompt.
  const columnRows=()=>{try{return db.prepare('SELECT key,label FROM library_columns ORDER BY position').all();}catch{return [];}};
- // Drafts stored before sources existed carry only the written copy. The derived rows depend on the
- // product library rather than on that particular generation, so they can be rebuilt on read - which
- // means an older draft still shows the full "written vs already in your data" split.
  function withSources(row){
   let blocks=[];try{blocks=JSON.parse(row.sections);}catch{blocks=[];}
   blocks=Array.isArray(blocks)?blocks.map(b=>({...b,source:b.source||'ai'})):[];
-  if(row.channel==='website'&&!blocks.some(b=>b.source!=='ai')){
-   const product=db.prepare('SELECT id,label,data FROM products WHERE id=?').get(row.product_id);
-   if(product){
-    let data={};try{data=JSON.parse(product.data);}catch{data={};}
-    blocks=blocks.concat(derivedCardRows({product,columns:columnRows(),data}));
-   }
-  }
+  // A website draft holds only the two strings the model wrote. Drafts saved earlier also carried
+  // the rows that come straight from the product library, so those are dropped on read.
+  if(row.channel==='website')blocks=blocks.filter(b=>b.source==='ai');
   return {...row,sections:blocks,prompt:parsePrompt(row.prompt)};
  }
  // The prompt is stored with the draft rather than recomputed on read: it depends on the product
