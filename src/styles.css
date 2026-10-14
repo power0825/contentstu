@@ -274,6 +274,8 @@ label{font-size:14px}.helper{font-size:14px}.subtle{font-size:12px}.image-note{f
 .modal-field select:focus{outline:2px solid #cfdbff;border-color:#9db4ef}
 .model-custom{display:flex;gap:8px;align-items:center;margin-top:6px}
 .model-custom input{margin-top:0}
+.required-mark{font-style:normal;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#9a6b1f;background:#fdf3d9;border:1px solid #f0dcae;border-radius:999px;padding:1px 7px;margin-left:6px}
+.required-note{color:#9a6b1f}
 .library-pick{margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
 .library-pick label{display:block;font-size:12px;color:#5b6b86;font-weight:500;margin-bottom:7px}
 .library-pick select{width:100%;border:1px solid #dce3ef;border-radius:8px;padding:10px 12px;font-size:14px;color:var(--ink);background:white}
