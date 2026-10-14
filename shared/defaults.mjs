@@ -8,9 +8,10 @@ Reference fabric image, intended garment, presentation style and user brief.
 
 ## Workflow
 1. Identify the intended application and preserve the reference fabric's visible color and texture as closely as possible.
-2. Describe the garment silhouette, composition, lighting and background.
-3. Use realistic fabric detail; do not add unsupported claims or branding.
-4. If the request is a revision, retain everything the user has not asked to change.
+2. Match the presentation first. When it asks for a model or a scene, the prompt must describe that scene, and must not be reduced to a bare product photograph.
+3. Describe the garment silhouette, composition, lighting and background.
+4. Use realistic fabric detail; do not add unsupported claims or branding.
+5. If the request is a revision, retain everything the user has not asked to change.
 
 ## Output
 One concise image-generation prompt in English. Application imagery is illustrative; actual color, texture and drape need human review.`
@@ -51,6 +52,16 @@ export const RATIOS = { "1:1": "1024x1024", "4:3": "1152x864", "3:4": "864x1152"
 // Models a course account can pick in Model settings. The list is a suggestion only:
 // the account's own Bailian workspace decides what is actually enabled, and every ID
 // stays editable so a new model does not need a code change.
+// What the shot has to show, per presentation choice. Shared, so the brief the student sees and the
+// requirement sent to the prompt writer can never drift apart.
+export const PRESENTATION_BRIEF = {
+ "Product only": "Show the product on its own with no person in frame.",
+ "Model wearing product": "Show it worn by a model, framed so the fit, drape and length read clearly.",
+ "Lifestyle scene": "Place it in a real everyday setting with natural context around it.",
+ "Product detail": "Frame a close-up of the fabric surface and the construction details.",
+ "Social media visual": "Compose it as a clean social media visual with space for a caption."
+};
+
 export const MODEL_CANDIDATES = {
   image: ["qwen-image-3.0", "qwen-image-3.0-pro", "qwen-image-2.1-pro", "qwen-image-2.1-turbo"],
   video: ["wan3.0-video", "wan3.0-video-prime"]

@@ -9,22 +9,15 @@ import TextStudio from './text';
 import PromptSettings from './prompts';
 import Costs from './costs';
 import ModelSettings from './model-settings';
-import { DEFAULT_CONFIG,RATIOS } from "../shared/defaults.mjs";
+import { DEFAULT_CONFIG,RATIOS,PRESENTATION_BRIEF } from "../shared/defaults.mjs";
 type Profile=typeof DEFAULT_CONFIG;
 type Item={id:string;prompt:string;brief:string;ratio:string;reference_id:string;result_id:string|null;status:string;error:string|null;created_at:string};
 const APPLICATION_OPTIONS=["Polo shirt","T-shirt","Hoodie / Sweatshirt","Dress","Skirt","Blouse / Shirt","Jacket / Outerwear","Sportswear / Activewear","Kidswear","Scarf / Bandana","Cap / Headwear","Bag / Tote","Home textile (cushion, bedding)","Chair / Sofa upholstery","Sneakers","Packaging / Gift box"];
 // The presentation decides what the shot has to show, so it is appended after the product sentence.
 // Without it the model only ever draws the product on its own, whatever the dropdown says.
-const PRESENTATION_BRIEF:Record<string,string>={
- "Product only":"Show the product on its own with no person in frame.",
- "Model wearing product":"Show it worn by a model, framed so the fit, drape and length read clearly.",
- "Lifestyle scene":"Place it in a real everyday setting with natural context around it.",
- "Product detail":"Frame a close-up of the fabric surface and the construction details.",
- "Social media visual":"Compose it as a clean social media visual with space for a caption."
-};
 function briefFor(app:string,presentation="Product only"){
  const a=app.toLowerCase(),p=app.toLowerCase();
- const scene=PRESENTATION_BRIEF[presentation]||"";
+ const scene=(PRESENTATION_BRIEF as Record<string,string>)[presentation]||"";
  let base="";
  if(a.includes("polo"))base="Create a premium polo shirt using this fabric. Use a clean light-grey studio background, soft natural lighting, and show the collar and fabric texture clearly.";
  else if(/t-shirt|hoodie|sweatshirt|blouse|shirt|dress|skirt|jacket|outerwear|sportswear|activewear|kidswear/.test(a))base=`Create a premium ${p} using this fabric. Use a clean light-grey studio background, soft natural lighting, and show the garment shape, drape and fabric texture clearly.`;
