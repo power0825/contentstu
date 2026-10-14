@@ -96,19 +96,23 @@ export function createVideo({db,dataDir,env,fetcher,owned,dataUrl,saveAsset,prov
   // place entirely. Three tries also cover a reply that parses but carries the wrong shape.
   try{
    const system=prompts.values(u.id).module('video.storyboard'),durations=[3,4,3,5];
-   let parsed=null;
+   let parsed=null,truncated=false;
    for(let attempt=0;attempt<3&&!parsed;attempt++){
     const o=await provider('chat/completions',{model:creds.textModel,messages:[{role:'system',content:system},{role:'user',content:p.brief}],max_tokens:4000},120000,creds);
-    const str=String(o.choices?.[0]?.message?.content||'');
+    const choice=o.choices?.[0],message=choice?.message||{};
+    const str=String(message.content||'');
     // Recorded on every call, so a retry never hides the tokens it spent.
     costs?.recordText({userId:u,stage:'Storyboard, script & captions',model:creds.textModel,groupId:p.id,groupKind:'video',groupLabel:p.title||p.brief,usage:o.usage,chars:str.length});
     const candidate=extractJson(str);
-    if(candidate&&Array.isArray(candidate.shots)&&candidate.shots.length===4)parsed=candidate;
-    // Enough of the reply to tell a truncated answer from one wrapped in prose, without
-    // dumping a whole storyboard into the log.
-    else console.error('Storyboard reply unusable (attempt '+(attempt+1)+', '+str.length+' chars) head: '+str.slice(0,200)+' | tail: '+str.slice(-200));
+    if(candidate&&Array.isArray(candidate.shots)&&candidate.shots.length===4){parsed=candidate;break;}
+    // A thinking model that spent its whole budget on the trace answers 200 with an empty
+    // content. Logging the shape tells that apart from prose wrapping, and there is no point
+    // retrying a reply that ran out of room.
+    truncated=choice?.finish_reason==='length';
+    console.error('Storyboard reply unusable (attempt '+(attempt+1)+', '+str.length+' chars, finish='+(choice?.finish_reason||'?')+', completion_tokens='+((o.usage&&o.usage.completion_tokens)||'?')+', reasoning_chars='+String(message.reasoning_content||'').length+') head: '+str.slice(0,200)+' | tail: '+str.slice(-200));
+    if(truncated)break;
    }
-   if(!parsed)fail('The model did not return a usable four-shot storyboard. Try again.',502);
+   if(!parsed)fail(truncated?'The model ran out of output space before finishing the storyboard. Try again.':'The model did not return a usable four-shot storyboard. Try again.',502);
    const raw={...p,shots:parsed.shots.map((s,i)=>({...s,id:randomUUID(),duration:durations[i],trimStart:0,firstFrameId:'',lastFrameId:''}))};
    const old={...p,shots:raw.shots};
    const next=sanitize(raw,old,u);put(next,u);
