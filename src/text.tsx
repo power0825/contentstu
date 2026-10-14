@@ -44,7 +44,7 @@ export default function TextStudio(){
  async function load(){
   try{const [l,t]=await Promise.all([fetch('/api/library').then(r=>r.json()),fetch('/api/text').then(r=>r.json())]);
    setProducts(l.products||[]);setColumns(l.columns||[]);setProductId(prev=>prev||l.products?.[0]?.id||'');
-   setDrafts(t.drafts||[]);setLayers(t.layers||[]);setChannels(t.channels?.length?t.channels:[{id:'website',label:'Website page copy'},{id:'instagram',label:'Instagram post'},{id:'linkedin',label:'LinkedIn post'}]);setLanguages(t.languages?.length?t.languages:[{id:'en',label:'English'},{id:'zh',label:'Simplified Chinese'},{id:'ms',label:'Bahasa Melayu'}]);
+   setDrafts(t.drafts||[]);setLayers(t.layers||[]);setChannels(t.channels?.length?t.channels:[{id:'website',label:t("Website page copy")},{id:'instagram',label:t("Instagram post")},{id:'linkedin',label:t("LinkedIn post")}]);setLanguages(t.languages?.length?t.languages:[{id:'en',label:'English'},{id:'zh',label:t("Simplified Chinese")},{id:'ms',label:'Bahasa Melayu'}]);
   }catch(e){setError(e instanceof Error?e.message:'Could not load the studio.');}
  }
  useEffect(()=>{load();},[]);
@@ -87,7 +87,7 @@ export default function TextStudio(){
  function sectionBlock(s:Section,key:string){
   const badge=sourceOf(s);
   return <div className={`draft-section source-${badge}`} key={key}>
-   <div className="draft-label"><span>{s.label}</span><span className="draft-tools"><em className={`source-badge ${badge}`}>{SOURCE_BADGE[badge]||badge}</em><button className="icon-button" title={t("Copy this block")} onClick={async()=>{const payload=s.items?s.items.join('\n'):s.text||'';try{await navigator.clipboard.writeText(payload);setCopied(key);setTimeout(()=>setCopied(''),1500);}catch{setError(t("Your browser blocked the clipboard."));}}}>{copied===key?<Check size={14}/>:<Copy size={14}/>}</button></span></div>
+   <div className="draft-label"><span>{t(s.label)}</span><span className="draft-tools"><em className={`source-badge ${badge}`}>{t(SOURCE_BADGE[badge]||badge)}</em><button className="icon-button" title={t("Copy this block")} onClick={async()=>{const payload=s.items?s.items.join('\n'):s.text||'';try{await navigator.clipboard.writeText(payload);setCopied(key);setTimeout(()=>setCopied(''),1500);}catch{setError(t("Your browser blocked the clipboard."));}}}>{copied===key?<Check size={14}/>:<Copy size={14}/>}</button></span></div>
    {s.items?<ul>{s.items.map((item,j)=><li key={j}>{item}</li>)}</ul>:<p>{s.text}</p>}
   </div>;
  }
@@ -98,8 +98,8 @@ export default function TextStudio(){
   <section className="panel">
    <div className="panel-heading"><h2>{t("What should we write?")}</h2><span className="tag"><Sparkles size={13}/>{languageLabel}</span></div>
    <label>{t("Product")}<select value={productId} onChange={e=>setProductId(e.target.value)}>{products.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select></label>
-   <div className="channel-tabs">{channels.map(c=>{const Icon=CHANNEL_ICON[c.id]||Globe;return <button key={c.id} className={channel===c.id?'active':''} onClick={()=>setChannel(c.id)}><Icon size={16}/>{c.label}</button>;})}</div>
-   <label>{t("Language")}<select value={language} onChange={e=>setLanguage(e.target.value)}>{languages.map(l=><option key={l.id} value={l.id}>{l.label}</option>)}</select></label>
+   <div className="channel-tabs">{channels.map(c=>{const Icon=CHANNEL_ICON[c.id]||Globe;return <button key={c.id} className={channel===c.id?'active':''} onClick={()=>setChannel(c.id)}><Icon size={16}/>{t(c.label)}</button>;})}</div>
+   <label>{t("Language")}<select value={language} onChange={e=>setLanguage(e.target.value)}>{languages.map(l=><option key={l.id} value={l.id}>{t(l.label)}</option>)}</select></label>
    <label>{t("Angle or must-mention (optional)")}<textarea rows={3} maxLength={600} value={angle} onChange={e=>setAngle(e.target.value)} placeholder={t("e.g. focus on four-way stretch for yoga brands, mention sample availability")}/></label>
    <button className="button primary wide" disabled={!!busy||!productId} onClick={generate}>{busy==='generate'?<LoaderCircle className="spin" size={18}/>:<Sparkles size={18}/>}Write the copy</button>
    {product&&<div className="spec-preview"><h3>{t("Facts the model will use")}</h3><dl>{columns.map(c=><div key={c.key}><dt>{c.label}</dt><dd>{product.data[c.key]||'not supplied'}</dd></div>)}</dl></div>}
