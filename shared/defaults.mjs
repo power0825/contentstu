@@ -38,7 +38,7 @@ The product specification table, the company facts and the author's brief.
 6. Write the caption last. One line, under eight words, and nothing that is not in the table.
 
 ## Frame prompts
-The first frame is a still photograph: subject, composition, lens, light, palette, texture, mood. The last frame is optional and only for shots 2 and 3, where the garment has to end in a specific state.
+The first frame is a still photograph: subject, composition, lens, light, palette, texture, mood. The last frame is optional and only for shots 2 and 3, where the garment has to end in a specific state. Never pad a frame prompt with a resolution or quality boast - no 8k, 4k, ultra HD or best quality. The render size is already decided elsewhere and the words only dilute the description.
 
 ## Motion prompts
 Describe subject motion, camera path and speed, how the light behaves, and what must stay identical. Consistency of fabric color and construction outranks every other instruction.

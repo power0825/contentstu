@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {TEXT_CHANNELS,headerFor} from './prompts.mjs';
 import {extractJson} from './jsonish.mjs';
+import {factsBlock,productBlock,companyFacts} from './facts.mjs';
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
 const fail=(message,status=400)=>{const e=new Error(message);e.status=status;throw e;};
 export const LANGUAGES={en:'English',zh:'Simplified Chinese',ms:'Bahasa Melayu'};
@@ -25,13 +26,6 @@ export const PROMPT_LAYERS=[
 ];
 const LOCKED_LAYERS=new Set(PROMPT_LAYERS.filter(l=>l.locked).map(l=>l.key));
 const OMITTABLE_LAYERS=PROMPT_LAYERS.filter(l=>!l.locked).map(l=>l.key);
-function factsBlock(company){
- if(!Array.isArray(company)||!company.length)return 'None supplied.';
- return company.map(f=>'- '+f.field+': '+(f.value||'')+(f.note?' ('+f.note+')':'')).join('\n').slice(0,4000);
-}
-function productBlock(columns,data){
- return columns.map(c=>'- '+c.label+': '+(data[c.key]||'not supplied')).join('\n').slice(0,4000);
-}
 const pick=(value,max=4000)=>{const v=typeof value==='string'?value.trim():'';return v?v.slice(0,max):'';};
 export function buildSections(channel,parsed,ctx={}){
  const out=[];
@@ -87,7 +81,6 @@ export function createTextStudio({db,env,provider,credsFor,reserve,refund,costs,
   }catch{}
   return null;
  }
- const companyFacts=()=>{try{return JSON.parse(db.prepare("SELECT value FROM library_meta WHERE key='company'").get()?.value||'[]');}catch{return [];}};
  const channelList=()=>Object.keys(CHANNELS).map(id=>({id,label:CHANNELS[id].label}));
  const languageList=()=>Object.keys(LANGUAGES).map(id=>({id,label:LANGUAGES[id]}));
  function line(parts){return parts.filter(Boolean).join('\n');}
