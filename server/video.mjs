@@ -1,4 +1,5 @@
 import {RATIOS} from '../shared/defaults.mjs';
+import {extractJson} from './jsonish.mjs';
 import {randomUUID} from 'node:crypto';
 import {readFileSync,writeFileSync,mkdirSync,rmSync} from 'node:fs';
 import {join,resolve} from 'node:path';
@@ -78,14 +79,42 @@ export function createVideo({db,dataDir,env,fetcher,owned,dataUrl,saveAsset,prov
  }catch(e){if(!closed){const current=get(p.id,u);if(current.exportToken===p.exportToken){current.exportStatus='failed';current.exportError=limited(e.message,700);put(current,u);}}}finally{exports.delete(p.id);rmSync(work,{recursive:true,force:true});}}
  async function handle(request,u){const url=new URL(request.url);if(url.pathname==='/api/video/upload'&&request.method==='POST'){const f=(await request.formData()).get('file');if(!(f instanceof File)||!f.size||f.size>100*1024*1024)fail('Upload MP4, MP3 or WAV under 100 MB.');const b=Buffer.from(await f.arrayBuffer());let mime='';if(b.subarray(4,8).toString()==='ftyp')mime='video/mp4';if(b.subarray(0,3).toString()==='ID3'||(b[0]===255&&(b[1]&224)===224))mime='audio/mpeg';if(b.subarray(0,4).toString()==='RIFF'&&b.subarray(8,12).toString()==='WAVE')mime='audio/wav';if(!mime)fail('Use an MP4 video, MP3 or WAV audio file.');return {id:saveAsset(u,b,mime,f.name.slice(0,180)),mime};}
  if(request.method==='GET'){const projects=db.prepare('SELECT document FROM video_projects WHERE user_id=? ORDER BY updated_at DESC').all(u).map(r=>decorate(JSON.parse(r.document),u));const c=credsFor(u,true);return {projects,connection:!!c.key};}
- if(request.method!=='POST')fail('Method not allowed.',405);const b=await request.json();const creds=credsFor(u);
+ if(request.method!=='POST')fail('Method not allowed.',405);let b;try{b=await request.json();}catch{fail('The request could not be read.',400);}const creds=credsFor(u);
  if(b.action==='create'){const p={id:randomUUID(),title:limited(b.title,120)||'From fabric to everyday style',brief:'Create a premium 15-second product film: deep teal pique fabric becomes a polo shirt, then a model wears it. Highlight texture and everyday style.',ratio:'16:9',resolution:'720P',brand:'EVERKNIT',endLine:'Explore our pique collection.',music:'ambient',musicId:'',logoId:'',transition:'cut',subtitles:true,exportId:'',exportStatus:'idle',exportError:'',shots:[['Material in motion',3,'Suspended teal fabric forms a sculptural wave in a dark studio. Side lighting reveals the knit texture.'],['Fabric becomes a polo',4,'The fabric folds inward and forms a complete polo. Match the first and last frame composition.'],['Crafted detail',3,'Camera glides past the collar and three-button placket, revealing the complete polo.'],['Everyday style',5,'A model wearing the same polo walks one step in a sunlit corridor, then pauses for the brand ending.']].map(([title,duration,script])=>({id:randomUUID(),title,duration,script,imagePrompt:`Photorealistic premium commercial keyframe. ${script} Deep teal pique fabric, consistent product identity. No text or logo.`,lastImagePrompt:title==='Fabric becomes a polo'?'A complete deep teal pique polo shirt suspended in a dark charcoal studio, centered and symmetrical. Three-button placket, ribbed collar and cuffs. Same framing, lighting and scale as the suspended fabric first frame. No text or logos.':'',videoPrompt:`One continuous cinematic shot, ${duration} seconds. ${script} Maintain deep teal color, fine pique texture, collar, sleeves and three-button placket. No text, logos or audio.`,caption:'',firstFrameId:'',lastFrameId:'',trimStart:0}))};put(p,u);return {project:decorate(p,u)};}
  const id=safe(b.projectId||b.project?.id),p=get(id,u);if(exports.has(id))fail('Wait for the export to finish before editing.',409);
  if(b.action==='save'){if(locked.has(id))fail('Wait for the current operation.',409);const clean=sanitize(b.project,p,u);if(decorate(p,u).shots.some(s=>active(s.status)))fail('Wait for active clips before editing the project.',409);put(clean,u);return {project:decorate(clean,u)};}
  if(b.action==='poll'){for(const j of db.prepare("SELECT * FROM video_jobs WHERE project_id=? AND user_id=? AND status IN ('pending','running','downloading')").all(id,u))await pollJob(j);return {project:decorate(get(id,u),u)};}
  if(locked.has(id))fail('Another project operation is in progress.',409);locked.add(id);
  try{
- if(b.action==='storyboard'){if(!creds.textModel)fail('Configure VOLCENGINE_TEXT_MODEL first.',503);if(decorate(p,u).shots.some(s=>active(s.status)))fail('Wait for active clips.',409);const quota=reserve(u,'prompt');try{const o=await provider('chat/completions',{model:creds.textModel,messages:[{role:'system',content:prompts.values(u.id).module('video.storyboard')},{role:'user',content:p.brief}],max_tokens:3000},120000,creds);const str=o.choices?.[0]?.message?.content;const parsed=JSON.parse(str.replace(/^```(?:json)?\s*/,'').replace(/\s*```$/,''));if(!Array.isArray(parsed.shots)||parsed.shots.length!==4)fail('The model did not return four shots. Try again.',502);const durations=[3,4,3,5];const raw={...p,shots:parsed.shots.map((s,i)=>({...s,id:randomUUID(),duration:durations[i],trimStart:0,firstFrameId:'',lastFrameId:''}))};const old={...p,shots:raw.shots};const next=sanitize(raw,old,u);put(next,u);costs?.recordText({userId:u,stage:'Storyboard, script & captions',model:creds.textModel,groupId:next.id,groupKind:'video',groupLabel:next.title||next.brief,usage:o.usage,chars:String(str||'').length});return {project:decorate(next,u)};}catch(e){refund(quota,'prompt');throw e;}}
+ if(b.action==='storyboard'){
+  if(!creds.textModel)fail('Configure the language model first.',503);
+  if(decorate(p,u).shots.some(s=>active(s.status)))fail('Wait for active clips.',409);
+  const quota=reserve(u,'prompt');
+  // The reply goes through extractJson instead of a bare JSON.parse. A model often opens with a
+  // sentence or closes with a remark, and JSON.parse threw a SyntaxError on those - which the
+  // request handler then reported as "the request could not be read", pointing at the wrong
+  // place entirely. Three tries also cover a reply that parses but carries the wrong shape.
+  try{
+   const system=prompts.values(u.id).module('video.storyboard'),durations=[3,4,3,5];
+   let parsed=null;
+   for(let attempt=0;attempt<3&&!parsed;attempt++){
+    const o=await provider('chat/completions',{model:creds.textModel,messages:[{role:'system',content:system},{role:'user',content:p.brief}],max_tokens:4000},120000,creds);
+    const str=String(o.choices?.[0]?.message?.content||'');
+    // Recorded on every call, so a retry never hides the tokens it spent.
+    costs?.recordText({userId:u,stage:'Storyboard, script & captions',model:creds.textModel,groupId:p.id,groupKind:'video',groupLabel:p.title||p.brief,usage:o.usage,chars:str.length});
+    const candidate=extractJson(str);
+    if(candidate&&Array.isArray(candidate.shots)&&candidate.shots.length===4)parsed=candidate;
+    // Enough of the reply to tell a truncated answer from one wrapped in prose, without
+    // dumping a whole storyboard into the log.
+    else console.error('Storyboard reply unusable (attempt '+(attempt+1)+', '+str.length+' chars) head: '+str.slice(0,200)+' | tail: '+str.slice(-200));
+   }
+   if(!parsed)fail('The model did not return a usable four-shot storyboard. Try again.',502);
+   const raw={...p,shots:parsed.shots.map((s,i)=>({...s,id:randomUUID(),duration:durations[i],trimStart:0,firstFrameId:'',lastFrameId:''}))};
+   const old={...p,shots:raw.shots};
+   const next=sanitize(raw,old,u);put(next,u);
+   return {project:decorate(next,u)};
+  }catch(e){refund(quota,'prompt');throw e;}
+ }
  const shot=p.shots.find(s=>s.id===b.shotId);
  if(['image','prompt','generate','attach'].includes(b.action)&&!shot)fail('Shot not found.',404);
  if(b.action==='image'){const last=b.frame==='last',prompt=last?shot.lastImagePrompt:shot.imagePrompt;if(!prompt)fail('Write an image prompt first.');const reference=safe(b.referenceId||shot.firstFrameId);if(!reference)fail('Upload or select a product reference image.');if(!owned(reference,u).mime.startsWith('image/'))fail('Choose an image.');const quota=reserve(u,'image');try{const out=await provider('images/generations',{model:creds.imageModel,prompt,image:dataUrl(reference,u),size:(RATIOS[p.ratio]||'1024x1024'),response_format:'b64_json',stream:false,watermark:true,sequential_image_generation:'disabled'},180000,creds);const item=out.data?.[0]||{};let bytes;if(typeof item.b64_json==='string'&&item.b64_json&&item.b64_json.length<=40000000){bytes=Buffer.from(item.b64_json,'base64');}else if(typeof item.url==='string'&&/^https:\/\/[\w.-]*aliyuncs\.com\//.test(item.url)){const dr=await fetcher(item.url,{signal:AbortSignal.timeout(120000)});if(!dr.ok)fail('Could not download the generated image.',502);bytes=Buffer.from(await dr.arrayBuffer());}else{fail('No usable image returned.',502);}shot[last?'lastFrameId':'firstFrameId']=saveAsset(u,bytes,bytes[0]===137?'image/png':'image/jpeg','video-keyframe');p.exportId='';put(p,u);costs?.recordImage({userId:u,stage:`${last?'Last':'First'}-frame keyframe`,model:creds.imageModel,groupId:p.id,groupKind:'video',groupLabel:`${p.title} · ${shot.title}`,size:p.ratio});return {project:decorate(p,u)};}catch(e){refund(quota,'image');throw e;}}

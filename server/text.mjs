@@ -1,5 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {TEXT_CHANNELS,headerFor} from './prompts.mjs';
+import {extractJson} from './jsonish.mjs';
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
 const fail=(message,status=400)=>{const e=new Error(message);e.status=status;throw e;};
 export const LANGUAGES={en:'English',zh:'Simplified Chinese',ms:'Bahasa Melayu'};
@@ -30,39 +31,6 @@ function factsBlock(company){
 }
 function productBlock(columns,data){
  return columns.map(c=>'- '+c.label+': '+(data[c.key]||'not supplied')).join('\n').slice(0,4000);
-}
-// Models sometimes leave real line breaks inside a JSON string, which makes JSON.parse throw.
-// Escape those, then drop commas that trail the last member of an object or array.
-function repairJson(input){
- let out='',inString=false,escaped=false;
- for(const ch of String(input||'')){
-  if(inString){
-   if(escaped){out+=ch;escaped=false;continue;}
-   if(ch==='\\'){out+=ch;escaped=true;continue;}
-   if(ch==='"'){out+=ch;inString=false;continue;}
-   if(ch==='\n'){out+='\\n';continue;}
-   if(ch==='\r'){continue;}
-   if(ch==='\t'){out+='\\t';continue;}
-   if(ch<'\u0020'){continue;}
-   out+=ch;
-   continue;
-  }
-  if(ch==='"'){inString=true;out+=ch;continue;}
-  out+=ch;
- }
- return out.replace(/,(\s*[}\]])/g,'$1');
-}
-function extractJson(raw){
- const text=String(raw||'').replace(/```[a-zA-Z]*/g,'').trim();
- const start=text.indexOf('{'),end=text.lastIndexOf('}');
- const candidates=[];
- if(start>=0&&end>start)candidates.push(text.slice(start,end+1));
- candidates.push(text);
- for(const candidate of candidates){
-  try{const parsed=JSON.parse(candidate);if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))return parsed;}catch{}
-  try{const parsed=JSON.parse(repairJson(candidate));if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))return parsed;}catch{}
- }
- return null;
 }
 const pick=(value,max=4000)=>{const v=typeof value==='string'?value.trim():'';return v?v.slice(0,max):'';};
 export function buildSections(channel,parsed,ctx={}){
