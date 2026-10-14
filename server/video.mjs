@@ -21,7 +21,11 @@ function assScript(w,h,env,items,styleKey){
  const p={...captionPresets[(limited(styleKey,20)||limited(env.CAPTION_STYLE,20)).toLowerCase()]||captionPresets.fine};
  const positive=(v,d)=>{const n=Number(v);return Number.isFinite(n)&&n>0?n:d;};
  const switchOn=(v,d)=>v===undefined||v===''?d:/^(1|true|yes|on)$/i.test(String(v).trim());
- const font=limited(env.CAPTION_FONT,60)||p.font;
+ // Chinese captions need a font that actually has the glyphs. The Latin presets above are chosen
+ // for shape, and none of them carries CJK, so the moment a caption contains Chinese characters
+ // the style switches to the CJK family. See the font install in the Dockerfile.
+ const cjk=/[\u3000-\u303f\u3400-\u9fff\uff00-\uffef]/.test(items.map(c=>String(c.text||'')).join(''));
+ const font=limited(cjk?env.CAPTION_FONT_CJK:env.CAPTION_FONT,60)||(cjk?'Noto Sans CJK SC':p.font);
  const scale=h/720,margin=Math.round(w*0.055);
  const size=Math.round(h*positive(env.CAPTION_SIZE,p.size)/100),mv=Math.round(h*positive(env.CAPTION_BOTTOM,p.mv)/100);
  const outline=p.box?Math.max(6,Math.round(p.outline*scale)):Math.max(1,+(p.outline*scale).toFixed(2));
@@ -35,7 +39,7 @@ const limited=(v,n=4000)=>typeof v==='string'?v.trim().slice(0,n):'';
 const fail=(m,s=400)=>{const e=new Error(m);e.status=s;throw e;};
 const safe=(v)=>limited(v,100);
 const active=s=>['submitting','pending','running','downloading'].includes(s);
-export function createVideo({db,dataDir,env,fetcher,owned,dataUrl,saveAsset,provider,credsFor,reserve,refund,profileFor,costs,prompts}){
+export function createVideo({db,dataDir,env,fetcher,owned,dataUrl,saveAsset,provider,credsFor,languageFor,reserve,refund,profileFor,costs,prompts}){
  db.exec(`CREATE TABLE IF NOT EXISTS video_projects(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,document TEXT NOT NULL,updated_at TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS video_jobs(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,project_id TEXT NOT NULL,shot_id TEXT NOT NULL,task_id TEXT,status TEXT NOT NULL,asset_id TEXT,error TEXT,created_at TEXT NOT NULL,last_poll INTEGER DEFAULT 0,costed INTEGER NOT NULL DEFAULT 0);
  CREATE TABLE IF NOT EXISTS video_usage(id TEXT PRIMARY KEY,count INTEGER DEFAULT 0);`);
@@ -107,9 +111,12 @@ export function createVideo({db,dataDir,env,fetcher,owned,dataUrl,saveAsset,prov
   // place entirely. Three tries also cover a reply that parses but carries the wrong shape.
   try{
    const system=prompts.values(u.id).module('video.storyboard'),durations=[3,4,3,5];
+   // JSON keys stay as they are - the code reads them - but the words inside are written in the
+   // account's language.
+   const inChinese=languageFor(u)==='zh';
    // Everything the film is allowed to say, in one block: the film settings, the specification
    // table and the company facts are official; the brief is direction only and cannot add facts.
-   const direction=['Film settings: '+p.ratio+' aspect ratio, '+p.resolution+'.','',facts.text,'','Company facts (official, quote only what is listed):',companyBlock(db),'','Author brief (creative direction only - it must not be read as product facts):',p.brief||'None supplied.'].join('\n');
+   const direction=['Film settings: '+p.ratio+' aspect ratio, '+p.resolution+'.','',facts.text,'','Company facts (official, quote only what is listed):',companyBlock(db),'','Author brief (creative direction only - it must not be read as product facts):',p.brief||'None supplied.'].concat(inChinese?['','Language: write every value - title, script, imagePrompt, lastImagePrompt, videoPrompt and caption - in Simplified Chinese. Leave the JSON keys exactly as specified.']:[]).join('\n');
    let parsed=null,truncated=false;
    for(let attempt=0;attempt<3&&!parsed;attempt++){
     const o=await provider('chat/completions',{model:creds.textModel,messages:[{role:'system',content:system},{role:'user',content:direction}],max_tokens:4000},120000,creds);
@@ -141,7 +148,7 @@ export function createVideo({db,dataDir,env,fetcher,owned,dataUrl,saveAsset,prov
   // The motion prompt quotes the same table, so a shot cannot introduce a claim the film's
   // specification does not make.
   const facts=officialBlock(db,p.productId);if(!facts)fail('Choose a product from the shared library first.',400);
-  const quota=reserve(u,'prompt');try{const content=[{type:'text',text:`${facts.text}\n\nFilm brief: ${p.brief}\nShot: ${shot.script}\nDuration: ${shot.duration}\nRatio: ${p.ratio}\nHas last frame: ${!!shot.lastFrameId}\nCurrent prompt: ${shot.videoPrompt}`}];if(shot.firstFrameId)content.push({type:'image_url',image_url:{url:dataUrl(shot.firstFrameId,u)}});if(shot.lastFrameId)content.push({type:'image_url',image_url:{url:dataUrl(shot.lastFrameId,u)}});const out=await provider('chat/completions',{model:creds.textModel,messages:[{role:'system',content:prompts.values(u.id).module('video.shot')},{role:'user',content}],max_tokens:1400},90000,creds);shot.videoPrompt=limited(out.choices?.[0]?.message?.content,12000);if(!shot.videoPrompt)fail('No prompt returned.',502);put(p,u);costs?.recordText({userId:u,stage:'Shot video prompt',model:creds.textModel,groupId:p.id,groupKind:'video',groupLabel:`${p.title} · ${shot.title}`,usage:out.usage,chars:shot.videoPrompt.length});return {project:decorate(p,u)};}catch(e){refund(quota,'prompt');throw e;}}
+  const quota=reserve(u,'prompt');try{const content=[{type:'text',text:`${facts.text}\n\nFilm brief: ${p.brief}\nShot: ${shot.script}\nDuration: ${shot.duration}\nRatio: ${p.ratio}\nHas last frame: ${!!shot.lastFrameId}\nCurrent prompt: ${shot.videoPrompt}${languageFor(u)==='zh'?'\nWrite the resulting prompt in Simplified Chinese.':''}`}];if(shot.firstFrameId)content.push({type:'image_url',image_url:{url:dataUrl(shot.firstFrameId,u)}});if(shot.lastFrameId)content.push({type:'image_url',image_url:{url:dataUrl(shot.lastFrameId,u)}});const out=await provider('chat/completions',{model:creds.textModel,messages:[{role:'system',content:prompts.values(u.id).module('video.shot')},{role:'user',content}],max_tokens:1400},90000,creds);shot.videoPrompt=limited(out.choices?.[0]?.message?.content,12000);if(!shot.videoPrompt)fail('No prompt returned.',502);put(p,u);costs?.recordText({userId:u,stage:'Shot video prompt',model:creds.textModel,groupId:p.id,groupKind:'video',groupLabel:`${p.title} · ${shot.title}`,usage:out.usage,chars:shot.videoPrompt.length});return {project:decorate(p,u)};}catch(e){refund(quota,'prompt');throw e;}}
  if(b.action==='attach'){const asset=owned(safe(b.assetId),u);if(asset.mime!=='video/mp4')fail('Choose an MP4 clip.');if(active(decorate(p,u).shots.find(s=>s.id===shot.id).status))fail('Wait for this clip generation.',409);db.prepare('INSERT INTO video_jobs(id,user_id,project_id,shot_id,status,asset_id,created_at) VALUES(?,?,?,?,?,?,?)').run(randomUUID(),u,id,shot.id,'complete',asset.id,now());p.exportId='';p.exportStatus='idle';put(p,u);return {project:decorate(p,u)};}
  if(b.action==='generate'){if(!shot.firstFrameId||!shot.videoPrompt)fail('Add a first frame and video prompt before generation.');if(active(decorate(p,u).shots.find(s=>s.id===shot.id).status))fail('This shot is already generating.',409);if(!creds.key)fail('Connect your Bailian API key first, in Model settings.',503);const quota=u+':'+now().slice(0,10);db.prepare('INSERT OR IGNORE INTO video_usage(id,count) VALUES(?,0)').run(quota);db.prepare('UPDATE video_usage SET count=count+1 WHERE id=?').run(quota);
  const job=randomUUID();db.prepare('INSERT INTO video_jobs(id,user_id,project_id,shot_id,status,created_at) VALUES(?,?,?,?,?,?)').run(job,u,id,shot.id,'submitting',now());try{const media=[{type:'first_frame',url:dataUrl(shot.firstFrameId,u)}];if(shot.lastFrameId)media.push({type:'last_frame',url:dataUrl(shot.lastFrameId,u)});const result=await bailian('/services/aigc/video-generation/video-synthesis',{model:creds.videoModel||'wan3.0-video',input:{prompt:shot.videoPrompt,media},parameters:{resolution:p.resolution,ratio:p.ratio,duration:shot.duration,prompt_extend:false,audio:false}},creds);if(!result.output?.task_id)fail('Bailian returned no task ID. Check the provider console before retrying.',502);db.prepare("UPDATE video_jobs SET task_id=?,status='pending' WHERE id=?").run(result.output.task_id,job);p.exportId='';p.exportStatus='idle';put(p,u);return {project:decorate(p,u)};}catch(e){db.prepare("UPDATE video_jobs SET status='failed',error=? WHERE id=?").run(limited(e.message,500),job);throw e;}}

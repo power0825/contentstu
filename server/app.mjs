@@ -22,7 +22,8 @@ export function createApp({dataDir=join(process.cwd(),'data'),env=process.env,fe
  CREATE TABLE IF NOT EXISTS model_settings(user_id TEXT PRIMARY KEY,api_key TEXT NOT NULL DEFAULT '',image_model TEXT NOT NULL DEFAULT '',video_model TEXT NOT NULL DEFAULT '',openai_url TEXT NOT NULL DEFAULT '',dash_url TEXT NOT NULL DEFAULT '',workspace TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,mime TEXT NOT NULL,name TEXT NOT NULL,created_at TEXT NOT NULL);CREATE INDEX IF NOT EXISTS assets_user ON assets(user_id);
 CREATE TABLE IF NOT EXISTS generations(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,prompt TEXT NOT NULL,brief TEXT NOT NULL,ratio TEXT NOT NULL,reference_id TEXT NOT NULL,result_id TEXT,status TEXT NOT NULL,error TEXT,config TEXT NOT NULL,created_at TEXT NOT NULL,session_id TEXT NOT NULL DEFAULT '');CREATE INDEX IF NOT EXISTS history_user ON generations(user_id,created_at);
-CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,count INTEGER NOT NULL DEFAULT 0,prompts INTEGER NOT NULL DEFAULT 0);`);
+CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,count INTEGER NOT NULL DEFAULT 0,prompts INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS preferences(user_id TEXT PRIMARY KEY,language TEXT NOT NULL DEFAULT 'en',updated_at TEXT NOT NULL);`);
  if(!new Set(db.prepare('PRAGMA table_info(generations)').all().map(c=>c.name)).has('session_id'))db.exec("ALTER TABLE generations ADD COLUMN session_id TEXT NOT NULL DEFAULT ''");
  // A reference may be one of your own uploads, or a photo attached to a product-library entry:
  // the shared library is readable by every account, so any class can use it. Anything else stays
@@ -32,6 +33,13 @@ CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,count INTEGER NOT NULL DEFA
  function saveAsset(user,bytes,mime,name){const id=randomUUID(),path=join(dataDir,'images',id);writeFileSync(path,bytes);try{db.prepare('INSERT INTO assets VALUES(?,?,?,?,?)').run(id,user,mime,name,new Date().toISOString());}catch(e){unlinkSync(path);throw e;}return id;}
  // Usage is still counted so the cost pages keep working, but nothing is refused on a daily quota.
  function reserve(user,kind){const id=user+':'+new Date().toISOString().slice(0,10);const field=kind==='image'?'count':'prompts';db.prepare('INSERT OR IGNORE INTO usage(id,count,prompts) VALUES(?,0,0)').run(id);db.prepare(`UPDATE usage SET ${field}=${field}+1 WHERE id=?`).run(id);return id;}
+ // The interface language is stored per account, because the server has to know it too: a
+ // Chinese interface that still produced English copy would be half a feature. Defaults to
+ // English, which is what the overseas classes use.
+ function languageFor(userId){const row=db.prepare('SELECT language FROM preferences WHERE user_id=?').get(userId);return row&&row.language==='zh'?'zh':'en';}
+ // Only Chinese is spelled out. The English path stays byte-identical to what the classes have
+ // been using, so switching the interface language cannot disturb the tuned prompts.
+ const writeIn=lang=>lang==='zh'?' Write the result in Simplified Chinese.':'';
  function refund(id,kind){const field=kind==='image'?'count':'prompts';db.prepare(`UPDATE usage SET ${field}=MAX(0,${field}-1) WHERE id=?`).run(id);}
  // Every model call resolves its credentials through here. A course account must bring its own
  // Bailian key; only the administrator may fall back to the server .env, so a student cannot
@@ -78,7 +86,7 @@ CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,count INTEGER NOT NULL DEFA
  const profileFor=u=>db.prepare('SELECT name,rules,skill FROM profiles WHERE user_id=?').get(u)||DEFAULT_CONFIG;
  const costs=createCosts({db,env});
  const prompts=createPromptSettings(db);
- const video=createVideo({db,dataDir,env,fetcher,owned,dataUrl,saveAsset,provider,credsFor,reserve,refund,profileFor,costs,prompts});
+ const video=createVideo({db,dataDir,env,fetcher,owned,dataUrl,saveAsset,provider,credsFor,languageFor,reserve,refund,profileFor,costs,prompts});
  const admin=createAdmin({db,dataDir,auth});
  const library=createLibrary({db,dataDir,saveAsset});
  const studio=createTextStudio({db,env,provider,credsFor,reserve,refund,costs,prompts});
@@ -163,7 +171,15 @@ CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,count INTEGER NOT NULL DEFA
    if(path==='/api/text')return await studio.handle(request,user);
    if(path==='/api/prompts'){const out=await prompts.handle(request,user);return json(out.body,out.status);}
    if(path==='/api/costs')return await costs.handle(request,user);
-  if(path==='/api/model-settings')return await modelSettings(request,user);
+   if(path==='/api/model-settings')return await modelSettings(request,user);
+   if(path==='/api/preferences'){
+    if(request.method==='GET')return json({language:languageFor(user.id)});
+    if(request.method!=='POST')throw new AppError('Method not allowed.',405);
+    let prefs;try{prefs=await request.json();}catch{throw new AppError('The request could not be read.',400);}
+    const language=prefs.language==='zh'?'zh':'en';
+    db.prepare('INSERT INTO preferences(user_id,language,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET language=excluded.language,updated_at=excluded.updated_at').run(user.id,language,new Date().toISOString());
+    return json({language});
+   }
    if(path==='/api/video'||path==='/api/video/upload')return json(await video.handle(request,user.id));
    if(path==='/api/studio'&&request.method==='GET'){
     const profile=db.prepare('SELECT name,rules,skill FROM profiles WHERE user_id=?').get(user.id)||DEFAULT_CONFIG;
@@ -197,6 +213,8 @@ CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,count INTEGER NOT NULL DEFA
    // Credentials first: an account that is not set up at all is a different problem from a missing
    // product, and the message should send them to the right place.
    const creds=credsFor(user.id);
+   // Empty in English mode: the shipped prompts stay exactly as the classes have been using them.
+   const language=writeIn(languageFor(user.id));
    // Every prompt and every render is tied to one entry of the shared library. Without it there is
    // no official fact to work from, and a model with no facts invents them.
    const facts=officialBlock(db,text(b.productId||'',80,'product'));
@@ -206,7 +224,7 @@ CREATE TABLE IF NOT EXISTS usage(id TEXT PRIMARY KEY,count INTEGER NOT NULL DEFA
    if(b.action==='prepare'){
     if(!creds.textModel)throw new AppError('The instructor needs to configure the language model ID before prompt preparation.',503);
     const brief=text(b.brief,4000,'creative brief',true),application=text(b.application||'',200,'application'),presentation=text(b.presentation||'',100,'presentation'),previous=text(b.previousPrompt||'',12000,'previous prompt');const quota=reserve(user.id,'prompt');
-    try{const out=await provider('chat/completions',{model:creds.textModel,messages:[{role:'system',content:values.module('image.prepare')},{role:'user',content:[{type:'text',text:`Presentation: ${presentation}\nShot requirement - the prompt must describe this, and must not be reduced to a product-only photograph: ${PRESENTATION_BRIEF[presentation]||'Follow the brief.'}\nApplication: ${application}\nAspect ratio: ${ratio}\n${facts.text}\nBrief or revision: ${brief}\nPrevious prompt: ${previous||'None'}\nUse the reference for product identity, color and texture.`},{type:'image_url',image_url:{url:dataUrl(ref,user.id)}}]}],max_tokens:1800},180000,creds);const prompt=out.choices?.[0]?.message?.content;if(typeof prompt!=='string'||!prompt.trim())throw new AppError('No usable prompt was returned.',502);costs.recordText({userId:user.id,stage:'Prompt preparation',model:creds.textModel,groupId:session,groupKind:'image',groupLabel:brief,usage:out.usage,chars:prompt.length});return json({prompt:prompt.trim(),sessionId:session});}catch(e){refund(quota,'prompt');throw e;}
+    try{const out=await provider('chat/completions',{model:creds.textModel,messages:[{role:'system',content:values.module('image.prepare')},{role:'user',content:[{type:'text',text:`Presentation: ${presentation}\nShot requirement - the prompt must describe this, and must not be reduced to a product-only photograph: ${PRESENTATION_BRIEF[presentation]||'Follow the brief.'}\nApplication: ${application}\nAspect ratio: ${ratio}\n${facts.text}\nBrief or revision: ${brief}\nPrevious prompt: ${previous||'None'}\nUse the reference for product identity, color and texture.${language}`},{type:'image_url',image_url:{url:dataUrl(ref,user.id)}}]}],max_tokens:1800},180000,creds);const prompt=out.choices?.[0]?.message?.content;if(typeof prompt!=='string'||!prompt.trim())throw new AppError('No usable prompt was returned.',502);costs.recordText({userId:user.id,stage:'Prompt preparation',model:creds.textModel,groupId:session,groupKind:'image',groupLabel:brief,usage:out.usage,chars:prompt.length});return json({prompt:prompt.trim(),sessionId:session});}catch(e){refund(quota,'prompt');throw e;}
    }
    const prompt=text(b.prompt,12000,'image prompt',true),brief=text(b.brief||'',4000,'brief');const quota=reserve(user.id,'image');const id=randomUUID();let recorded=false;
    try{db.prepare('INSERT INTO generations(id,user_id,prompt,brief,ratio,reference_id,status,config,created_at,session_id) VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,user.id,prompt,brief,ratio,ref,'generating',JSON.stringify({...profile,productId:facts.product.id,product:facts.product.label}),new Date().toISOString(),session);recorded=true;const images=[dataUrl(ref,user.id)];if(b.originalReferenceId&&b.originalReferenceId!==ref)images.push(dataUrl(text(b.originalReferenceId,100,'original reference',true),user.id));const out=await provider('images/generations',{model:creds.imageModel,prompt,image:images.length===1?images[0]:images,size:RATIOS[ratio],response_format:'b64_json',stream:false,watermark:true,sequential_image_generation:'disabled'},180000,creds);const bytes=await imageBytes(out);const mime=bytes[0]===137?'image/png':'image/jpeg';const resultId=saveAsset(user.id,bytes,mime,'generated-'+id);db.prepare("UPDATE generations SET status='complete',result_id=? WHERE id=? AND user_id=?").run(resultId,id,user.id);costs.recordImage({userId:user.id,stage:'Image generation',model:creds.imageModel,groupId:session,groupKind:'image',groupLabel:brief||prompt.slice(0,120),size:RATIOS[ratio]});return json({id,resultId,sessionId:session});}catch(e){refund(quota,'image');if(recorded)db.prepare("UPDATE generations SET status='failed',error=? WHERE id=? AND user_id=?").run(e instanceof AppError?e.message:'Generation failed. Please try again.',id,user.id);throw e;}

@@ -11,11 +11,16 @@ FROM node:22-bookworm-slim
 
 # ffmpeg  -> required by the video export pipeline (spawn in server/video.mjs)
 # fonts   -> the libass `subtitles` filter needs real font files at runtime
+#   fonts-noto-cjk matters when the interface is set to Chinese: without a font that actually
+#   contains Chinese glyphs, burned-in captions render as empty boxes. It is a large package
+#   (~190 MB installed). Swap it for fonts-wqy-zenhei (~16 MB) if image size ever becomes a
+#   problem, and point CAPTION_FONT_CJK at "WenQuanYi Zen Hei" when you do.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ffmpeg \
       fonts-dejavu-core \
       fonts-liberation \
+      fonts-noto-cjk \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
