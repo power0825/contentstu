@@ -1,0 +1,5 @@
+# Course files for the students.
+# Drop the .zip (or any file) in this folder, commit it and redeploy - the Course files page
+# lists whatever is here. Files starting with a dot are hidden from the list.
+# NOTE: everything in public/ is copied into the build and served as a static asset, so these
+# files can be downloaded WITHOUT signing in. Never put anything confidential in here.

@@ -5,7 +5,9 @@ import {createApp} from './app.mjs';
 try{process.loadEnvFile(resolve('.env'));}catch(e){if(e.code!=='ENOENT')throw e;}
 const production=process.argv.includes('--production');
 const host=process.env.HOST||'127.0.0.1',port=Number(process.env.PORT)||5173;
-const app=createApp({dataDir:resolve(process.env.DATA_DIR||'data')});let vite;
+// In production the static root is dist/, and vite copies public/ into it, so the course folder
+// the browser downloads from is dist/course. In dev it is served straight out of public/.
+const app=createApp({dataDir:resolve(process.env.DATA_DIR||'data'),courseDir:resolve(production?'dist/course':'public/course')});let vite;
 const server=http.createServer(async(req,res)=>{
  try{
   const origin=process.env.PUBLIC_ORIGIN||`${req.headers['x-forwarded-proto']||'http'}://${req.headers.host}`;const url=new URL(req.url,origin);

@@ -1,7 +1,7 @@
 import {DatabaseSync} from 'node:sqlite';
 import {randomUUID} from 'node:crypto';
-import {mkdirSync,writeFileSync,readFileSync,unlinkSync} from 'node:fs';
-import {join} from 'node:path';
+import {mkdirSync,writeFileSync,readFileSync,unlinkSync,readdirSync,statSync} from 'node:fs';
+import {join,resolve} from 'node:path';
 import {createVideo} from './video.mjs';
 import {createAuth} from './auth.mjs';
 import {createAdmin} from './admin.mjs';
@@ -15,7 +15,7 @@ import {officialBlock,libraryFacts} from './facts.mjs';
 class AppError extends Error{constructor(message,status=400){super(message);this.status=status;}}
 const json=(data,status=200,headers={})=>Response.json(data,{status,headers:{'Cache-Control':'no-store',...headers}});
 const text=(v,max,label,required=false)=>{if(typeof v!=='string'||v.length>max||(required&&!v.trim()))throw new AppError(`Check ${label} (maximum ${max.toLocaleString()} characters).`);return v.trim();};
-export function createApp({dataDir=join(process.cwd(),'data'),env=process.env,fetcher=fetch}={}){
+export function createApp({dataDir=join(process.cwd(),'data'),env=process.env,fetcher=fetch,courseDir=resolve('public/course')}={}){
  mkdirSync(join(dataDir,'images'),{recursive:true});const db=new DatabaseSync(join(dataDir,'studio.sqlite'));db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;');
  const auth=createAuth(db,{secureCookies:env.COOKIE_SECURE==='true',adminIdentifier:env.ADMIN_USERNAME||'admin',adminPassword:env.ADMIN_PASSWORD||'12345678'});
  db.exec(`CREATE TABLE IF NOT EXISTS profiles(user_id TEXT PRIMARY KEY,name TEXT NOT NULL,rules TEXT NOT NULL,skill TEXT NOT NULL,updated_at TEXT NOT NULL);
@@ -179,6 +179,20 @@ CREATE TABLE IF NOT EXISTS preferences(user_id TEXT PRIMARY KEY,language TEXT NO
     const language=prefs.language==='zh'?'zh':'en';
     db.prepare('INSERT INTO preferences(user_id,language,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET language=excluded.language,updated_at=excluded.updated_at').run(user.id,language,new Date().toISOString());
     return json({language});
+   }
+   // The list is read from the folder rather than kept in a manifest, so the instructor's whole
+   // workflow is "drop the file in, redeploy". The files themselves are served as ordinary static
+   // assets - reachable without signing in - so this page must never hold anything confidential.
+   // Only the listing is behind the session, which is what hides the names from the outside.
+   if(path==='/api/course'){
+    let files=[];
+    try{
+     files=readdirSync(courseDir,{withFileTypes:true})
+      .filter(entry=>entry.isFile()&&!entry.name.startsWith('.'))
+      .map(entry=>({name:entry.name,bytes:statSync(join(courseDir,entry.name)).size,url:'/course/'+encodeURIComponent(entry.name)}))
+      .sort((a,b)=>a.name.localeCompare(b.name));
+    }catch{files=[];}
+    return json({files});
    }
    if(path==='/api/video'||path==='/api/video/upload')return json(await video.handle(request,user.id));
    if(path==='/api/studio'&&request.method==='GET'){
