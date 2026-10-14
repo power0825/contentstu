@@ -258,6 +258,16 @@ label{font-size:14px}.helper{font-size:14px}.subtle{font-size:12px}.image-note{f
 @media(max-width:900px){.compare-columns{grid-template-columns:1fr}}
 .model-configure{width:100%;margin-top:12px;background:#22314c;border:1px solid #33456a;color:#dbe4f5;font-size:12px;font-weight:500;padding:8px 10px;border-radius:8px}
 .model-configure:hover{background:#2b3c5c;border-color:#43598a}
+.lang-switch{margin-top:14px}
+.lang-switch>div{display:flex;gap:6px;margin-top:7px}
+.lang-switch button{flex:1;background:#1a2941;border:1px solid #2a3b55;color:#a9b8d3;font-size:12px;font-weight:500;padding:7px 0;border-radius:8px}
+.lang-switch button.active{background:#315cf5;border-color:#315cf5;color:#fff}
+.lang-switch .nav-label{font-size:11px}
+.auth-lang{margin-top:22px;padding-top:16px;border-top:1px solid var(--line)}
+.auth-lang .nav-label{color:var(--muted)}
+.auth-lang>div{margin-top:6px}
+.auth-lang button{background:#fff;border:1px solid var(--line);color:var(--muted)}
+.auth-lang button.active{background:var(--blue);border-color:var(--blue);color:#fff}
 .modal-backdrop{position:fixed;inset:0;background:#0d1728b3;display:flex;align-items:center;justify-content:center;padding:24px;z-index:60}
 .modal-card{background:white;border-radius:14px;width:100%;max-width:560px;max-height:calc(100vh - 48px);overflow-y:auto;box-shadow:0 18px 50px #0b13261f;padding:24px}
 .modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
