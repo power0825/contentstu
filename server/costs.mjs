@@ -8,14 +8,19 @@ const round=n=>Math.round(n*1e6)/1e6;
 // call time so a later price change never rewrites history; the unit counts stay on the
 // row so the total can be recomputed against current prices if needed.
 export function createCosts({db,env}){
- db.exec(`CREATE TABLE IF NOT EXISTS cost_events(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,created_at TEXT NOT NULL,kind TEXT NOT NULL,stage TEXT NOT NULL,model TEXT NOT NULL,group_id TEXT NOT NULL,group_kind TEXT NOT NULL,group_label TEXT NOT NULL,units REAL NOT NULL,unit_label TEXT NOT NULL,unit_price REAL NOT NULL,cost REAL NOT NULL,detail TEXT NOT NULL);
+ db.exec(`CREATE TABLE IF NOT EXISTS cost_events(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,created_at TEXT NOT NULL,kind TEXT NOT NULL,stage TEXT NOT NULL,model TEXT NOT NULL,group_id TEXT NOT NULL,group_kind TEXT NOT NULL,group_label TEXT NOT NULL,units REAL NOT NULL,unit_label TEXT NOT NULL,unit_price REAL NOT NULL,cost REAL NOT NULL,detail TEXT NOT NULL,currency TEXT NOT NULL DEFAULT 'CNY');
  CREATE INDEX IF NOT EXISTS cost_events_user ON cost_events(user_id,created_at);
  CREATE INDEX IF NOT EXISTS cost_events_group ON cost_events(group_id);`);
+ // Rows written before 2026-10-14 were priced in CNY. Convert them once, at the rate the two
+ // published price lists imply (1 CNY = 1/7.272 USD), so a total never mixes two currencies.
+ // The presence of the column doubles as the marker, so this runs exactly once per database.
+ const columns=new Set(db.prepare('PRAGMA table_info(cost_events)').all().map(c=>c.name));
+ if(!columns.has('currency')){db.exec("ALTER TABLE cost_events ADD COLUMN currency TEXT NOT NULL DEFAULT 'CNY'");db.prepare("UPDATE cost_events SET cost=ROUND(cost/7.272,6),unit_price=ROUND(unit_price/7.272,6),currency='USD'").run();}
  const book=priceBook(env);
  function record(entry){
   const id=randomUUID();
-  db.prepare('INSERT INTO cost_events(id,user_id,created_at,kind,stage,model,group_id,group_kind,group_label,units,unit_label,unit_price,cost,detail) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-   .run(id,entry.userId,new Date().toISOString(),entry.kind,clean(entry.stage,80),clean(entry.model,80),clean(entry.groupId,80),clean(entry.groupKind,20),clean(entry.groupLabel,160),Number(entry.units)||0,clean(entry.unitLabel,24),Number(entry.unitPrice)||0,round(Number(entry.cost)||0),JSON.stringify(entry.detail||{}));
+  db.prepare('INSERT INTO cost_events(id,user_id,created_at,kind,stage,model,group_id,group_kind,group_label,units,unit_label,unit_price,cost,detail,currency) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+   .run(id,entry.userId,new Date().toISOString(),entry.kind,clean(entry.stage,80),clean(entry.model,80),clean(entry.groupId,80),clean(entry.groupKind,20),clean(entry.groupLabel,160),Number(entry.units)||0,clean(entry.unitLabel,24),Number(entry.unitPrice)||0,round(Number(entry.cost)||0),JSON.stringify(entry.detail||{}),book.currency);
   return id;
  }
  // Token counts come from the provider response. `estimated` marks the fallback used when
@@ -23,16 +28,19 @@ export function createCosts({db,env}){
  function recordText({userId,stage,model,groupId,groupKind,groupLabel,usage,chars=0}){
   let input=Number(usage?.prompt_tokens)||0,output=Number(usage?.completion_tokens)||0,cached=Number(usage?.prompt_tokens_details?.cached_tokens)||0,estimated=false;
   if(!input&&!output&&chars){input=Math.round(chars/4);estimated=true;}
-  const {cost,units,detail}=textCost(book,{input,output,cached});
-  return record({userId,stage,model,groupId,groupKind,groupLabel,units,unitLabel:'tokens',unitPrice:book.text.input,cost,kind:'text',detail:{...detail,estimated,price:{input:book.text.input,output:book.text.output,cached:book.text.cached},unit:book.text.unit}});
+  const callBook=priceBook(env,{text:model});
+  const {cost,units,detail}=textCost(callBook,{input,output,cached});
+  return record({userId,stage,model,groupId,groupKind,groupLabel,units,unitLabel:'tokens',unitPrice:callBook.text.input,cost,kind:'text',detail:{...detail,estimated,price:{input:callBook.text.input,output:callBook.text.output,cached:callBook.text.cached},unit:callBook.text.unit}});
  }
  function recordImage({userId,stage,model,groupId,groupKind,groupLabel,count=1,size=''}){
-  const {cost,units,detail,unitPrice}=imageCost(book,count);
-  return record({userId,stage,model,groupId,groupKind,groupLabel,units,unitLabel:'image',unitPrice,cost,kind:'image',detail:{...detail,size,price:unitPrice,unit:book.image.unit}});
+  const callBook=priceBook(env,{image:model});
+  const {cost,units,detail,unitPrice}=imageCost(callBook,count);
+  return record({userId,stage,model,groupId,groupKind,groupLabel,units,unitLabel:'image',unitPrice,cost,kind:'image',detail:{...detail,size,price:unitPrice,unit:callBook.image.unit}});
  }
  function recordVideo({userId,stage,model,groupId,groupKind,groupLabel,resolution='720P',seconds=0}){
-  const {cost,units,detail,unitPrice}=videoCost(book,resolution,seconds);
-  return record({userId,stage,model,groupId,groupKind,groupLabel,units,unitLabel:'second',unitPrice,cost,kind:'video',detail:{...detail,price:unitPrice,unit:book.video.unit}});
+  const callBook=priceBook(env,{video:model});
+  const {cost,units,detail,unitPrice}=videoCost(callBook,resolution,seconds);
+  return record({userId,stage,model,groupId,groupKind,groupLabel,units,unitLabel:'second',unitPrice,cost,kind:'video',detail:{...detail,price:unitPrice,unit:callBook.video.unit}});
  }
  const RANGES={all:0,today:1,'7d':7,'30d':30};
  async function handle(request,user){
@@ -58,7 +66,7 @@ export function createCosts({db,env}){
    const group=groups.get(key);
    group.total+=row.cost;
    if(row.created_at>group.created_at)group.created_at=row.created_at;
-   group.items.push({id:row.id,stage:row.stage,kind:row.kind,model:row.model,units:row.units,unitLabel:row.unit_label,unitPrice:row.unit_price,cost:row.cost,detail:JSON.parse(row.detail||'{}'),created_at:row.created_at,...(scope==='all'?{user:emails[row.user_id]||'—'}:{})});
+   group.items.push({id:row.id,stage:row.stage,kind:row.kind,model:row.model,units:row.units,unitLabel:row.unit_label,unitPrice:row.unit_price,cost:row.cost,detail:JSON.parse(row.detail||'{}'),created_at:row.created_at,currency:row.currency||book.currency,...(scope==='all'?{user:emails[row.user_id]||'—'}:{})});
   }
   const ordered=[...groups.values()].sort((a,b)=>b.created_at.localeCompare(a.created_at)).map(g=>({...g,total:round(g.total),items:g.items.sort((a,b)=>a.created_at.localeCompare(b.created_at))}));
   totals.all=round(totals.all);totals.text=round(totals.text);totals.image=round(totals.image);totals.video=round(totals.video);

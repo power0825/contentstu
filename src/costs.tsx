@@ -1,9 +1,11 @@
 import {useEffect,useState} from 'react';
 import {Receipt,LoaderCircle,AlertCircle,RefreshCw,ChevronDown,ChevronRight,Type,Image as ImageIcon,Film,ExternalLink,Info} from 'lucide-react';
-type Item={id:string;stage:string;kind:string;model:string;units:number;unitLabel:string;unitPrice:number;cost:number;detail:Record<string,unknown>;created_at:string;user?:string};
+type Item={id:string;stage:string;kind:string;model:string;units:number;unitLabel:string;unitPrice:number;cost:number;detail:Record<string,unknown>;created_at:string;currency?:string;user?:string};
 type Group={id:string;kind:string;label:string;created_at:string;total:number;items:Item[]};
 type Payload={scope:string;kind:string;range:string;totals:{all:number;text:number;image:number;video:number;events:number;units:{tokens:number;image:number;second:number}};groups:Group[];daily:{day:string;cost:number}[];pricing:{currency:string;verified:string;sources:Record<string,string>;text:{input:number;output:number;cached:number;unit:string};image:{perImage:number;unit:string};video:{'480P':number;'720P':number;'1080P':number;unit:string};models:{text:string;image:string;video:string}}};
-const money=(n:number)=>`¥${n<0.01&&n>0?n.toFixed(4):n.toFixed(2)}`;
+const SYMBOL:Record<string,string>={USD:'$',CNY:'¥'};
+const symbolOf=(currency:string)=>SYMBOL[currency]||'$';
+const money=(n:number,currency='USD')=>`${symbolOf(currency)}${n<0.01&&n>0?n.toFixed(4):n.toFixed(2)}`;
 const kindIcon=(kind:string)=>kind==='video'?Film:kind==='image'?ImageIcon:Type;
 const KIND_LABEL:Record<string,string>={text:'Language model',image:'Image model',video:'Video model'};
 export default function Costs({user}:{user:{id:string;email:string;role?:string}}){
@@ -35,20 +37,20 @@ export default function Costs({user}:{user:{id:string;email:string;role?:string}
      <span className={`cost-kind ${item.kind}`}>{item.kind}</span>
      <span className="cost-stage">{item.stage}{item.user&&<em>{item.user}</em>}</span>
      <code>{item.model}</code>
-     <span className="cost-units">{item.unitLabel==='tokens'?`${Number((item.detail.inputTokens as number)||0).toLocaleString()} in / ${Number((item.detail.outputTokens as number)||0).toLocaleString()} out`:`${item.units} ${item.unitLabel}${item.units===1?'':'s'} × ¥${item.unitPrice}`}</span>
+     <span className="cost-units">{item.unitLabel==='tokens'?`${Number((item.detail.inputTokens as number)||0).toLocaleString()} in / ${Number((item.detail.outputTokens as number)||0).toLocaleString()} out`:`${item.units} ${item.unitLabel}${item.units===1?'':'s'} × ${symbolOf(item.currency||data.pricing.currency)}${item.unitPrice}`}</span>
      {Boolean(item.detail.estimated)&&<span className="cost-flag" title="The provider did not return token usage, so tokens were estimated from text length.">estimated</span>}
      {typeof item.detail.resolution==='string'&&item.detail.resolution?<span className="cost-flag">{item.detail.resolution}</span>:null}
-     <b>{money(item.cost)}</b>
+     <b>{money(item.cost,item.currency||data.pricing.currency)}</b>
     </div>)}</div>}
    </div>;})}
   </section>}
   <section className="panel cost-pricing">
    <div className="panel-heading"><h2>Prices used</h2><span className="tag"><Info size={13}/>verified {data.pricing.verified}</span></div>
-   <p className="helper">Official list prices, in {data.pricing.currency}. Change them in the .env file (PRICE_TEXT_INPUT, PRICE_TEXT_OUTPUT, PRICE_IMAGE, PRICE_VIDEO_720P …) if your account has different terms.</p>
+   <p className="helper">Official list prices for the Singapore region, in {data.pricing.currency}. Override any of them in the .env file (PRICE_TEXT_INPUT, PRICE_TEXT_OUTPUT, PRICE_IMAGE, PRICE_VIDEO_720P …) if your account has different terms.</p>
    <div className="price-grid">
-    <div><span className="eyebrow">LANGUAGE MODEL</span><code>{data.pricing.models.text}</code><ul><li>Input ¥{data.pricing.text.input} {data.pricing.text.unit}</li><li>Output ¥{data.pricing.text.output} {data.pricing.text.unit}</li><li>Cache hit ¥{data.pricing.text.cached} {data.pricing.text.unit}</li></ul></div>
-    <div><span className="eyebrow">IMAGE MODEL</span><code>{data.pricing.models.image}</code><ul><li>¥{data.pricing.image.perImage} {data.pricing.image.unit} <em>flat, any size</em></li></ul></div>
-    <div><span className="eyebrow">VIDEO MODEL</span><code>{data.pricing.models.video}</code><ul><li>480P ¥{data.pricing.video['480P']} {data.pricing.video.unit}</li><li>720P ¥{data.pricing.video['720P']} {data.pricing.video.unit}</li><li>1080P ¥{data.pricing.video['1080P']} {data.pricing.video.unit}</li></ul></div>
+    <div><span className="eyebrow">LANGUAGE MODEL</span><code>{data.pricing.models.text}</code><ul><li>Input {symbolOf(data.pricing.currency)}{data.pricing.text.input} {data.pricing.text.unit}</li><li>Output {symbolOf(data.pricing.currency)}{data.pricing.text.output} {data.pricing.text.unit}</li><li>Cache hit {symbolOf(data.pricing.currency)}{data.pricing.text.cached} {data.pricing.text.unit}</li></ul></div>
+    <div><span className="eyebrow">IMAGE MODEL</span><code>{data.pricing.models.image}</code><ul><li>{symbolOf(data.pricing.currency)}{data.pricing.image.perImage} {data.pricing.image.unit}</li></ul></div>
+    <div><span className="eyebrow">VIDEO MODEL</span><code>{data.pricing.models.video}</code><ul><li>480P {symbolOf(data.pricing.currency)}{data.pricing.video['480P']} {data.pricing.video.unit}</li><li>720P {symbolOf(data.pricing.currency)}{data.pricing.video['720P']} {data.pricing.video.unit}</li><li>1080P {symbolOf(data.pricing.currency)}{data.pricing.video['1080P']} {data.pricing.video.unit}</li></ul></div>
    </div>
    <div className="price-sources">{Object.entries(data.pricing.sources).map(([key,url])=><a key={key} href={url} target="_blank" rel="noreferrer">{key} price list <ExternalLink size={12}/></a>)}</div>
    <p className="helper">Video is only charged when a clip finishes successfully — failed tasks are not billed. The price above is the public pay-as-you-go rate; a dedicated or negotiated deployment can bill differently.</p>
